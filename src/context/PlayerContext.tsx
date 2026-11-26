@@ -41,12 +41,21 @@ import {
 } from '../services/storageDb';
 import {
   fetchCuratedFeeds,
+  resolveYouTubeMusicVideoId,
   resolveYouTubeVideoId,
   searchOnlineTracks,
   searchYouTubeTracks,
 } from '../services/musicApi';
 import { fetchSyncedLyrics } from '../services/lrclibApi';
-import { extractCoverAmbientPalette, fisherYatesShuffle } from '../utils/audioUtils';
+import {
+  DEFAULT_AMBIENT_PALETTE,
+  TrackMoodInfo,
+  detectTrackMood,
+  extractCoverAmbientPalette,
+  generateSquircleArtworkDataUrl,
+  mixTracksByMood,
+  smartShuffleTracks,
+} from '../utils/audioUtils';
 import { generateSimulatedWeeklyHistory } from '../utils/weeklyAuraUtils';
 
 interface YTPlayerInstance {
@@ -89,10 +98,32 @@ interface YTNamespace {
   };
 }
 
+interface DynamicIslandPluginBridge {
+  updateState?: (options: {
+    title: string;
+    artist: string;
+    isPlaying: boolean;
+    artwork: string;
+  }) => Promise<{ canDrawOverlays?: boolean }>;
+  hide?: () => Promise<void>;
+  checkOverlayPermission?: () => Promise<{ granted: boolean }>;
+  requestOverlayPermission?: () => Promise<void>;
+  addListener?: (
+    eventName: 'islandAction',
+    listenerFunc: (data: { action: string }) => void
+  ) => Promise<{ remove: () => Promise<void> | void }> | { remove: () => void };
+}
+
 declare global {
   interface Window {
     YT?: YTNamespace;
     onYouTubeIframeAPIReady?: () => void;
+    Capacitor?: {
+      isNativePlatform?: () => boolean;
+      Plugins?: {
+        DynamicIsland?: DynamicIslandPluginBridge;
+      };
+    };
   }
 }
 
@@ -103,6 +134,8 @@ interface ToastMessage {
 }
 
 type PlaybackEngine = 'youtube' | 'html5' | null;
+export type ThemeMode = 'system' | 'light' | 'dark';
+export type ResolvedTheme = 'light' | 'dark';
 
 interface PlayerContextValue {
   // Navigation & Global Search
@@ -156,11 +189,16 @@ interface PlayerContextValue {
   loopMode: LoopMode;
   queueIds: string[];
   queueTracks: Track[];
+  currentMood: TrackMoodInfo | null;
   ambientColor: AmbientColor;
   ambientPalette: AmbientPalette;
 
   // Player Actions
-  playTrack: (track: Track, contextTracks?: Track[]) => void;
+  playTrack: (
+    track: Track,
+    contextTracks?: Track[],
+    options?: { preserveOrder?: boolean }
+  ) => void;
   playTrackAtTime: (track: Track, startSeconds?: number) => void;
   togglePlayPause: () => void;
   playNext: () => void;
@@ -184,6 +222,7 @@ interface PlayerContextValue {
 
   // Ambient Video Backdrop
   activeEngine: PlaybackEngine;
+  ambientVideoId: string | null;
   isAmbientVideoEnabled: boolean;
   setIsAmbientVideoEnabled: (enabled: boolean) => void;
   toggleAmbientVideo: () => void;
@@ -216,6 +255,13 @@ interface PlayerContextValue {
   setIsTwinModalOpen: (open: boolean) => void;
   listeningHistory: ListeningHistoryEntry[];
   simulateWeeklyAuraData: () => void;
+
+  // System Auto-Theme & Dynamic Theme Sync
+  themeMode: ThemeMode;
+  resolvedTheme: ResolvedTheme;
+  cycleThemeMode: () => void;
+  isDynamicThemeSync: boolean;
+  toggleDynamicThemeSync: () => void;
 
   // Notifications
   toasts: ToastMessage[];
@@ -307,13 +353,19 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(initialPrefs.volume);
   const [isMuted, setIsMuted] = useState(initialPrefs.isMuted);
-  const [isShuffled, setIsShuffled] = useState(initialPrefs.isShuffled);
+  const [isShuffled, setIsShuffled] = useState(false);
   const [loopMode, setLoopMode] = useState<LoopMode>(initialPrefs.loopMode);
   const [originalQueueIds, setOriginalQueueIds] = useState<string[]>([]);
   const [queueIds, setQueueIds] = useState<string[]>([]);
-  const [ambientPalette, setAmbientPalette] = useState<AmbientPalette>({
-    primary: { r: 148, g: 163, b: 184, hex: '#94A3B8' },
-    secondary: { r: 99, g: 102, b: 241, hex: '#6366F1' },
+  const [extractedPalette, setExtractedPalette] =
+    useState<AmbientPalette>(DEFAULT_AMBIENT_PALETTE);
+  const [isDynamicThemeSync, setIsDynamicThemeSync] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('nocty_dynamic_theme_sync');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
   });
   const [sleepTimerRemaining, setSleepTimerRemaining] = useState<number | null>(null);
   const [sleepTimerMode, setSleepTimerMode] = useState<'off' | 'countdown' | 'end_of_track'>('off');
@@ -332,9 +384,23 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isLyricCardOpen, setIsLyricCardOpen] = useState(false);
   const [isWeeklyAuraOpen, setIsWeeklyAuraOpen] = useState(false);
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
+  const [ambientVideoId, setAmbientVideoId] = useState<string | null>(null);
   const [listeningHistory, setListeningHistory] = useState<ListeningHistoryEntry[]>(() =>
     loadListeningHistory()
   );
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    try {
+      const saved = localStorage.getItem('nocty_theme_mode');
+      if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
+    } catch {
+      // Ignore storage access error
+    }
+    return 'system';
+  });
+  const [osPrefersDark, setOsPrefersDark] = useState<boolean>(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return true;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   // Dual Audio Engine Pools (2 YouTube IFrame Decks + 2 HTML5 <audio> Elements for true overlapping cross-fade)
@@ -356,6 +422,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const lastManualSeekAtRef = useRef<number>(0);
   const pendingInitialSeekRef = useRef<{ seq: number; seconds: number } | null>(null);
   const sleepTimerEndAtRef = useRef<number | null>(null);
+  const sleepTimeoutRef = useRef<number | null>(null);
   const sleepTimerModeRef = useRef<'off' | 'countdown' | 'end_of_track'>('off');
   sleepTimerModeRef.current = sleepTimerMode;
 
@@ -365,13 +432,18 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const ytAltTriedRef = useRef<Record<string, boolean>>({});
   const consecutiveErrorSkipsRef = useRef(0);
   const lyricsAbortRef = useRef<AbortController | null>(null);
+  const moodMixSeqRef = useRef(0);
 
   const trackRegistryRef = useRef(trackRegistry);
   trackRegistryRef.current = trackRegistry;
+  const originalQueueIdsRef = useRef(originalQueueIds);
+  originalQueueIdsRef.current = originalQueueIds;
   const queueIdsRef = useRef(queueIds);
   queueIdsRef.current = queueIds;
   const currentTrackIdRef = useRef(currentTrackId);
   currentTrackIdRef.current = currentTrackId;
+  const isShuffledRef = useRef(isShuffled);
+  isShuffledRef.current = isShuffled;
   const loopModeRef = useRef(loopMode);
   loopModeRef.current = loopMode;
   const volumeRef = useRef(volume);
@@ -386,6 +458,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   crossfadeDurationRef.current = crossfadeDuration;
   const isAutoplayEnabledRef = useRef(isAutoplayEnabled);
   isAutoplayEnabledRef.current = isAutoplayEnabled;
+  const listeningHistoryRef = useRef(listeningHistory);
+  listeningHistoryRef.current = listeningHistory;
 
   const listeningSessionRef = useRef<{
     trackId: string;
@@ -432,9 +506,84 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           changed = true;
         }
       }
-      return changed ? next : prev;
+      if (changed) {
+        trackRegistryRef.current = next;
+        return next;
+      }
+      return prev;
     });
   }, []);
+
+  // System Auto-Theme: listen for OS color-scheme changes & sync root classes
+  const resolvedTheme: ResolvedTheme =
+    themeMode === 'system' ? (osPrefersDark ? 'dark' : 'light') : themeMode;
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const updatePref = (e?: MediaQueryListEvent) => {
+      setOsPrefersDark(e ? e.matches : media.matches);
+    };
+    updatePref();
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', updatePref);
+      return () => media.removeEventListener('change', updatePref);
+    }
+    media.addListener(updatePref);
+    return () => media.removeListener(updatePref);
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove('light', 'dark');
+    root.classList.add(resolvedTheme);
+    root.style.colorScheme = resolvedTheme;
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme) {
+      metaTheme.setAttribute('content', resolvedTheme === 'dark' ? '#0B0B0D' : '#F2F4F8');
+    }
+  }, [resolvedTheme]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nocty_theme_mode', themeMode);
+    } catch {
+      // Ignore storage error
+    }
+  }, [themeMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nocty_dynamic_theme_sync', String(isDynamicThemeSync));
+    } catch {
+      // Ignore storage error
+    }
+  }, [isDynamicThemeSync]);
+
+  const toggleDynamicThemeSync = useCallback(() => {
+    setIsDynamicThemeSync((prev) => {
+      const next = !prev;
+      pushToast(
+        next ? 'Dynamic Theme Sync aktif' : 'Dynamic Theme Sync dimatikan',
+        'info'
+      );
+      return next;
+    });
+  }, [pushToast]);
+
+  const cycleThemeMode = useCallback(() => {
+    setThemeMode((prev) => {
+      const next: ThemeMode = prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system';
+      const label =
+        next === 'system'
+          ? 'Tema: Mengikuti Sistem OS'
+          : next === 'light'
+            ? 'Tema: Mode Terang'
+            : 'Tema: Mode Gelap';
+      pushToast(label, 'info');
+      return next;
+    });
+  }, [pushToast]);
 
   useEffect(() => {
     savePlaylistsToStorage(playlists);
@@ -601,8 +750,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setViralTracks(viral.length ? viral : global);
       setIndieRnbTracks(indieRnb.length ? indieRnb : indonesia);
 
-      setOriginalQueueIds((prev) => (prev.length === 0 ? combined.map((t) => t.id) : prev));
-      setQueueIds((prev) => (prev.length === 0 ? combined.map((t) => t.id) : prev));
+      if (queueIdsRef.current.length === 0) {
+        const initialIds = combined.map((t) => t.id);
+        originalQueueIdsRef.current = initialIds;
+        queueIdsRef.current = initialIds;
+        setOriginalQueueIds(initialIds);
+        setQueueIds(initialIds);
+      }
     } catch {
       registerTracks(EMERGENCY_FALLBACK_TRACKS);
       setFeaturedTracks(EMERGENCY_FALLBACK_TRACKS);
@@ -623,79 +777,232 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [currentTrackId, trackRegistry]
   );
 
-  // Web Media Session API integration
+  const currentMood = useMemo(
+    () => (currentTrack ? detectTrackMood(currentTrack) : null),
+    [currentTrack]
+  );
+
+  const lastMediaSessionPosRef = useRef<{
+    trackId: string | null;
+    sec: number;
+    dur: number;
+    playing: boolean;
+  }>({ trackId: null, sec: -1, dur: 0, playing: false });
+
+  // Web Media Session API integration (512x512 squircle artwork + responsive system/TWS controls)
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
     if (!currentTrack) {
       navigator.mediaSession.metadata = null;
+      lastMediaSessionPosRef.current = { trackId: null, sec: -1, dur: 0, playing: false };
       return;
     }
 
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: currentTrack.title,
-      artist: currentTrack.artist,
-      album: currentTrack.album || 'Nocty Music',
-      artwork: [
-        { src: currentTrack.coverUrl, sizes: '96x96', type: 'image/jpeg' },
-        { src: currentTrack.coverUrl, sizes: '128x128', type: 'image/jpeg' },
-        { src: currentTrack.coverUrl, sizes: '192x192', type: 'image/jpeg' },
-        { src: currentTrack.coverUrl, sizes: '256x256', type: 'image/jpeg' },
-        { src: currentTrack.coverUrl, sizes: '384x384', type: 'image/jpeg' },
-        { src: currentTrack.coverUrl, sizes: '512x512', type: 'image/jpeg' },
-      ],
+    let cancelled = false;
+    const baseArt = currentTrack.coverUrl;
+    const buildMetadata = (artworkSrc: string, mimeType: string) =>
+      new MediaMetadata({
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        album: currentTrack.album || 'Nocty Music',
+        artwork: [
+          { src: artworkSrc, sizes: '128x128', type: mimeType },
+          { src: artworkSrc, sizes: '256x256', type: mimeType },
+          { src: artworkSrc, sizes: '512x512', type: mimeType },
+        ],
+      });
+
+    navigator.mediaSession.metadata = buildMetadata(baseArt, 'image/jpeg');
+
+    generateSquircleArtworkDataUrl(baseArt, 512).then((squircleUrl) => {
+      if (cancelled || !squircleUrl || squircleUrl === baseArt) return;
+      try {
+        navigator.mediaSession.metadata = buildMetadata(squircleUrl, 'image/png');
+      } catch {
+        // Ignore if metadata update rejected
+      }
     });
 
-    navigator.mediaSession.setActionHandler('play', () => togglePlayPauseRef.current());
-    navigator.mediaSession.setActionHandler('pause', () => togglePlayPauseRef.current());
-    navigator.mediaSession.setActionHandler('stop', () => togglePlayPauseRef.current());
-    navigator.mediaSession.setActionHandler('previoustrack', () => playPrevRef.current());
-    navigator.mediaSession.setActionHandler('nexttrack', () => playNextRef.current());
-    navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+    const registerHandler = (
+      action: MediaSessionAction,
+      handler: MediaSessionActionHandler
+    ) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch {
+        // Ignore unsupported MediaSessionAction in older browsers
+      }
+    };
+
+    registerHandler('play', () => {
+      if (!isPlayingRef.current) togglePlayPauseRef.current();
+    });
+    registerHandler('pause', () => {
+      if (isPlayingRef.current) togglePlayPauseRef.current();
+    });
+    registerHandler('stop', () => {
+      if (isPlayingRef.current) togglePlayPauseRef.current();
+    });
+    registerHandler('previoustrack', () => playPrevRef.current());
+    registerHandler('nexttrack', () => playNextRef.current());
+    registerHandler('seekbackward', (details) => {
       seekToRef.current(Math.max(0, currentTimeRef.current - (details.seekOffset || 10)));
     });
-    navigator.mediaSession.setActionHandler('seekforward', (details) => {
+    registerHandler('seekforward', (details) => {
       seekToRef.current(currentTimeRef.current + (details.seekOffset || 10));
     });
-    navigator.mediaSession.setActionHandler('seekto', (details) => {
+    registerHandler('seekto', (details) => {
       if (details.seekTime !== undefined) seekToRef.current(details.seekTime);
     });
-  }, [currentTrack?.id]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTrack?.id, currentTrack?.coverUrl]);
 
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
     try {
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : currentTrack ? 'paused' : 'none';
-      if ('setPositionState' in navigator.mediaSession && duration > 0 && Number.isFinite(currentTime)) {
-        navigator.mediaSession.setPositionState({
-          duration: Math.max(0, duration),
-          playbackRate: 1,
-          position: Math.max(0, Math.min(currentTime, duration)),
-        });
+      navigator.mediaSession.playbackState = isPlaying
+        ? 'playing'
+        : currentTrack
+          ? 'paused'
+          : 'none';
+
+      if (
+        currentTrack &&
+        'setPositionState' in navigator.mediaSession &&
+        duration > 0 &&
+        Number.isFinite(currentTime)
+      ) {
+        const flooredSec = Math.floor(Math.max(0, Math.min(currentTime, duration)));
+        const roundedDur = Math.round(duration);
+        const prev = lastMediaSessionPosRef.current;
+
+        const shouldSync =
+          prev.trackId !== currentTrack.id ||
+          prev.sec !== flooredSec ||
+          Math.abs(prev.dur - roundedDur) >= 1 ||
+          prev.playing !== isPlaying;
+
+        if (shouldSync) {
+          lastMediaSessionPosRef.current = {
+            trackId: currentTrack.id,
+            sec: flooredSec,
+            dur: roundedDur,
+            playing: isPlaying,
+          };
+          navigator.mediaSession.setPositionState({
+            duration: Math.max(1, duration),
+            playbackRate: 1,
+            position: Math.max(0, Math.min(flooredSec, duration)),
+          });
+        }
       }
     } catch {
       // Ignore
     }
   }, [currentTime, duration, isPlaying, currentTrack]);
 
+  // Native Android Dynamic Island Floating Overlay & Media Foreground Service bridge (Capacitor)
+  useEffect(() => {
+    const cap = window.Capacitor;
+    const islandPlugin = cap?.Plugins?.DynamicIsland;
+    if (!cap?.isNativePlatform?.() || !islandPlugin?.addListener) return;
+
+    let disposed = false;
+    let activeHandle: { remove?: () => Promise<void> | void } | null = null;
+
+    const maybePromise = islandPlugin.addListener('islandAction', ({ action }) => {
+      if (action === 'togglePlay') {
+        togglePlayPauseRef.current();
+      } else if (action === 'play') {
+        if (!isPlayingRef.current) togglePlayPauseRef.current();
+      } else if (action === 'pause') {
+        if (isPlayingRef.current) togglePlayPauseRef.current();
+      } else if (action === 'next') {
+        playNextRef.current();
+      } else if (action === 'prev') {
+        playPrevRef.current();
+      }
+    });
+
+    Promise.resolve(maybePromise)
+      .then((handle) => {
+        if (disposed) {
+          handle?.remove?.();
+        } else {
+          activeHandle = handle;
+        }
+      })
+      .catch(() => {
+        // Ignore bridge listener failure
+      });
+
+    return () => {
+      disposed = true;
+      try {
+        activeHandle?.remove?.();
+      } catch {
+        // Ignore cleanup failure
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const cap = window.Capacitor;
+    const islandPlugin = cap?.Plugins?.DynamicIsland;
+    if (!cap?.isNativePlatform?.() || !islandPlugin) return;
+
+    if (!currentTrack) {
+      islandPlugin.hide?.().catch(() => {});
+      return;
+    }
+
+    islandPlugin
+      .updateState?.({
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        isPlaying,
+        artwork: currentTrack.coverUrl,
+      })
+      .catch(() => {});
+  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.coverUrl, isPlaying]);
+
+  const ambientPalette = useMemo<AmbientPalette>(
+    () => (isDynamicThemeSync ? extractedPalette : DEFAULT_AMBIENT_PALETTE),
+    [extractedPalette, isDynamicThemeSync]
+  );
+
   useEffect(() => {
     if (!currentTrack) return;
     let cancelled = false;
     extractCoverAmbientPalette(currentTrack.coverUrl, currentTrack.id).then((palette) => {
       if (cancelled) return;
-      setAmbientPalette(palette);
-      document.documentElement.style.setProperty(
-        '--ambient-rgb',
-        `${palette.primary.r}, ${palette.primary.g}, ${palette.primary.b}`
-      );
-      document.documentElement.style.setProperty(
-        '--ambient-secondary-rgb',
-        `${palette.secondary.r}, ${palette.secondary.g}, ${palette.secondary.b}`
-      );
+      setExtractedPalette(palette);
     });
     return () => {
       cancelled = true;
     };
   }, [currentTrack?.id, currentTrack?.coverUrl]);
+
+  useEffect(() => {
+    const rootStyle = document.documentElement.style;
+    rootStyle.setProperty(
+      '--ambient-rgb',
+      `${ambientPalette.primary.r}, ${ambientPalette.primary.g}, ${ambientPalette.primary.b}`
+    );
+    rootStyle.setProperty(
+      '--ambient-secondary-rgb',
+      `${ambientPalette.secondary.r}, ${ambientPalette.secondary.g}, ${ambientPalette.secondary.b}`
+    );
+    rootStyle.setProperty('--accent-hex', ambientPalette.primary.hex);
+    rootStyle.setProperty('--accent-contrast', ambientPalette.accentContrast);
+    rootStyle.setProperty(
+      '--bg-gradient-intensity',
+      String(ambientPalette.gradientIntensity)
+    );
+  }, [ambientPalette]);
 
   useEffect(() => {
     if (!currentTrack) return;
@@ -740,6 +1047,29 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     return () => controller.abort();
   }, [currentTrack?.id]);
+
+  // Resolve real moving YouTube Music Video ID for Ambient Video Backdrop
+  useEffect(() => {
+    if (!currentTrack || currentTrack.sourceType === 'local' || !isAmbientVideoEnabled) {
+      setAmbientVideoId(null);
+      return;
+    }
+
+    setAmbientVideoId(currentTrack.videoId || null);
+    const controller = new AbortController();
+
+    resolveYouTubeMusicVideoId(currentTrack.artist, currentTrack.title, controller.signal)
+      .then((mvId) => {
+        if (!controller.signal.aborted && mvId) {
+          setAmbientVideoId(mvId);
+        }
+      })
+      .catch(() => {
+        // Keep fallback videoId if available
+      });
+
+    return () => controller.abort();
+  }, [currentTrack?.id, currentTrack?.videoId, currentTrack?.sourceType, isAmbientVideoEnabled]);
 
   // Silent Listening History Tracker (>20s per play stored to nocty_listening_history)
   const flushListeningSession = useCallback(() => {
@@ -1036,6 +1366,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ? cfSeconds * 1000
           : Math.min(cfSeconds * 1000, 1400);
 
+      currentTrackIdRef.current = track.id;
       setCurrentTrackId(track.id);
       setCurrentTime(safeStart);
       setDuration(track.duration || 0);
@@ -1296,6 +1627,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (idx !== -1 && idx + 1 < q.length) {
         const nextTrack = trackRegistryRef.current[q[idx + 1]];
         if (nextTrack) {
+          currentTrackIdRef.current = nextTrack.id;
           startPlaybackRef.current(nextTrack, false, 'auto');
           return;
         }
@@ -1304,6 +1636,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (mode === 'all' && q.length > 0) {
         const firstTrack = trackRegistryRef.current[q[0]];
         if (firstTrack) {
+          currentTrackIdRef.current = firstTrack.id;
           startPlaybackRef.current(firstTrack, false, 'auto');
           return;
         }
@@ -1312,20 +1645,43 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (isAutoplayEnabledRef.current && curId) {
         const currentTrackObj = trackRegistryRef.current[curId];
         if (currentTrackObj) {
+          const anchorMood = detectTrackMood(currentTrackObj);
           setIsBuffering(true);
-          searchOnlineTracks(`${currentTrackObj.artist} hits ${currentTrackObj.title}`, undefined, 20)
+          searchOnlineTracks(
+            `${anchorMood.autoplayHint} ${currentTrackObj.artist}`,
+            undefined,
+            20
+          )
             .then(({ tracks }) => {
               const fresh = tracks.filter((t) => !queueIdsRef.current.includes(t.id));
               if (fresh.length > 0) {
                 registerTracks(fresh);
-                const newIds = fresh.map((t) => t.id);
-                setOriginalQueueIds((prev) => [...prev, ...newIds]);
-                setQueueIds((prev) => [...prev, ...newIds]);
+                const moodOrdered = mixTracksByMood(currentTrackObj, fresh).filter(
+                  (t) => t.id !== currentTrackObj.id
+                );
+                const orderedFresh = isShuffledRef.current
+                  ? smartShuffleTracks(
+                      moodOrdered,
+                      listeningHistoryRef.current,
+                      currentTrackObj
+                    )
+                  : moodOrdered;
+                const newIds = orderedFresh.map((t) => t.id);
+                const nextOrig = [...originalQueueIdsRef.current, ...moodOrdered.map((t) => t.id)];
+                const nextQ = [...queueIdsRef.current, ...newIds];
+                originalQueueIdsRef.current = nextOrig;
+                queueIdsRef.current = nextQ;
+                setOriginalQueueIds(nextOrig);
+                setQueueIds(nextQ);
                 const nextId = newIds[0];
                 const nextTrack = trackRegistryRef.current[nextId];
                 if (nextTrack) {
+                  currentTrackIdRef.current = nextTrack.id;
                   startPlaybackRef.current(nextTrack, false, 'auto');
-                  pushToast(`Autoplay: Memutar lagu rekomendasi dari ${currentTrackObj.artist}`, 'info');
+                  pushToast(
+                    `Autoplay (${anchorMood.label}): ${nextTrack.title}`,
+                    'info'
+                  );
                   return;
                 }
               }
@@ -1343,7 +1699,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setIsPlaying(false);
       setIsBuffering(false);
     };
-  }, [pushToast]);
+  }, [pushToast, registerTracks]);
 
   // Initialize Dual YouTube IFrame Players (Deck 0 & Deck 1) ONCE using isolated slot elements
   useEffect(() => {
@@ -1729,27 +2085,25 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [volume, isMuted, applyHtml5SlotGain, applyYtDeckGain]);
 
   const playTrack = useCallback(
-    (track: Track, contextTracks?: Track[]) => {
-      let tracksToUse = contextTracks;
-      if (!tracksToUse || tracksToUse.length === 0) {
-        const pool = [
-          track,
-          ...indonesiaTrending,
-          ...featuredTracks,
-          ...viralTracks,
-          ...indieRnbTracks,
-          ...Object.values(trackRegistryRef.current),
-        ];
-        const unique = Array.from(new Map(pool.map((t) => [t.id, t])).values());
-        tracksToUse = unique.slice(0, 35);
-      }
-      registerTracks(tracksToUse);
+    (
+      track: Track,
+      contextTracks?: Track[],
+      options?: { preserveOrder?: boolean }
+    ) => {
+      const globalPool = [
+        track,
+        ...indonesiaTrending,
+        ...featuredTracks,
+        ...viralTracks,
+        ...indieRnbTracks,
+        ...Object.values(trackRegistryRef.current),
+      ];
 
-      if (track.id === currentTrackId && !contextTracks) {
+      if (track.id === currentTrackIdRef.current && !contextTracks) {
         const deckIdx = activeYtDeckRef.current;
         const ytPlayer = ytPlayersRef.current[deckIdx];
         if (activeEngineRef.current === 'youtube' && ytReadyRef.current[deckIdx] && ytPlayer) {
-          if (isPlaying) {
+          if (isPlayingRef.current) {
             ytPlayer.pauseVideo();
           } else {
             setIsBuffering(true);
@@ -1760,7 +2114,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const slot = activeHtml5SlotRef.current;
         const audio = html5PoolRef.current[slot];
         if (activeEngineRef.current === 'html5' && audio?.src) {
-          if (isPlaying) {
+          if (isPlayingRef.current) {
             audio.pause();
           } else {
             setIsBuffering(true);
@@ -1770,25 +2124,103 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
 
-      if (contextTracks && contextTracks.length > 0) {
-        const baseIds = Array.from(new Set(contextTracks.map((t) => t.id)));
-        if (!baseIds.includes(track.id)) baseIds.unshift(track.id);
-        setOriginalQueueIds(baseIds);
-
-        if (isShuffled) {
-          const others = baseIds.filter((id) => id !== track.id);
-          setQueueIds([track.id, ...fisherYatesShuffle(others)]);
-        } else {
-          setQueueIds(baseIds);
-        }
-      } else if (!queueIds.includes(track.id)) {
-        setOriginalQueueIds((prev) => [track.id, ...prev]);
-        setQueueIds((prev) => [track.id, ...prev]);
+      // Clicking a track already inside the visible Queue plays it in-place without scrambling order
+      if (!contextTracks && queueIdsRef.current.includes(track.id)) {
+        registerTracks([track]);
+        currentTrackIdRef.current = track.id;
+        startPlaybackForTrack(track, false, 'skip');
+        return;
       }
 
+      const mixSeq = ++moodMixSeqRef.current;
+
+      if (options?.preserveOrder && contextTracks && contextTracks.length > 0) {
+        registerTracks(contextTracks);
+        const baseIds = Array.from(new Set(contextTracks.map((t) => t.id)));
+        if (!baseIds.includes(track.id)) baseIds.unshift(track.id);
+        isShuffledRef.current = false;
+        setIsShuffled(false);
+        originalQueueIdsRef.current = baseIds;
+        queueIdsRef.current = baseIds;
+        setOriginalQueueIds(baseIds);
+        setQueueIds(baseIds);
+      } else {
+        const primaryCandidates =
+          contextTracks && contextTracks.length > 0 ? contextTracks : globalPool;
+        const mixedTracks = mixTracksByMood(track, primaryCandidates, globalPool).slice(0, 35);
+        registerTracks(mixedTracks);
+
+        const baseIds = mixedTracks.map((t) => t.id);
+        isShuffledRef.current = false;
+        setIsShuffled(false);
+        originalQueueIdsRef.current = baseIds;
+        queueIdsRef.current = baseIds;
+        setOriginalQueueIds(baseIds);
+        setQueueIds(baseIds);
+
+        // Background mood enrichment if fewer than 6 same-mood upcoming tracks exist
+        const anchorMood = detectTrackMood(track);
+        const upcomingSameMoodCount = mixedTracks
+          .slice(1)
+          .filter((t) => detectTrackMood(t).mood === anchorMood.mood).length;
+
+        if (track.sourceType !== 'local' && upcomingSameMoodCount < 6) {
+          searchOnlineTracks(anchorMood.autoplayHint, undefined, 16)
+            .then(({ tracks: fetched }) => {
+              if (
+                moodMixSeqRef.current !== mixSeq ||
+                currentTrackIdRef.current !== track.id ||
+                isShuffledRef.current
+              ) {
+                return;
+              }
+              const currentQ = queueIdsRef.current;
+              const sameMoodAdditions = fetched.filter(
+                (t) =>
+                  !currentQ.includes(t.id) &&
+                  detectTrackMood(t).mood === anchorMood.mood
+              );
+              if (sameMoodAdditions.length === 0) return;
+
+              registerTracks(sameMoodAdditions);
+              const existingTracks = currentQ
+                .map((id) => trackRegistryRef.current[id])
+                .filter((t): t is Track => Boolean(t));
+              const curIdx = currentQ.indexOf(track.id);
+              const prefixIds = curIdx > 0 ? currentQ.slice(0, curIdx + 1) : [track.id];
+              const remainingExisting = existingTracks.filter(
+                (t) => !prefixIds.includes(t.id)
+              );
+              const remixedTail = mixTracksByMood(
+                track,
+                [...remainingExisting, ...sameMoodAdditions]
+              )
+                .filter((t) => !prefixIds.includes(t.id))
+                .slice(0, 35 - prefixIds.length);
+              const nextQ = [...prefixIds, ...remixedTail.map((t) => t.id)];
+
+              originalQueueIdsRef.current = nextQ;
+              queueIdsRef.current = nextQ;
+              setOriginalQueueIds(nextQ);
+              setQueueIds(nextQ);
+            })
+            .catch(() => {
+              // Keep immediate local/trending mood mix silently
+            });
+        }
+      }
+
+      currentTrackIdRef.current = track.id;
       startPlaybackForTrack(track, false, 'skip');
     },
-    [currentTrackId, isPlaying, isShuffled, queueIds, registerTracks, startPlaybackForTrack]
+    [
+      featuredTracks,
+      indieRnbTracks,
+      indonesiaTrending,
+      registerTracks,
+      startPlaybackForTrack,
+      viralTracks,
+    ]
   );
 
   const playTrackAtTime = useCallback(
@@ -1801,11 +2233,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ...indieRnbTracks,
         ...Object.values(trackRegistryRef.current),
       ];
-      const unique = Array.from(new Map(pool.map((t) => [t.id, t])).values()).slice(0, 35);
-      registerTracks(unique);
+      const mixed = mixTracksByMood(track, pool).slice(0, 35);
+      registerTracks(mixed);
 
-      const baseIds = unique.map((t) => t.id);
-      if (!baseIds.includes(track.id)) baseIds.unshift(track.id);
+      const baseIds = mixed.map((t) => t.id);
+      isShuffledRef.current = false;
+      setIsShuffled(false);
+      originalQueueIdsRef.current = baseIds;
+      queueIdsRef.current = baseIds;
       setOriginalQueueIds(baseIds);
       setQueueIds(baseIds);
 
@@ -1828,6 +2263,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
 
+      currentTrackIdRef.current = track.id;
       startPlaybackForTrack(track, false, 'skip', startSeconds);
     },
     [
@@ -1900,12 +2336,31 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   ]);
 
   const playNext = useCallback(() => {
-    if (queueIds.length === 0) return;
-    const idx = currentTrackId ? queueIds.indexOf(currentTrackId) : -1;
-    const nextIdx = idx + 1 < queueIds.length ? idx + 1 : 0;
-    const nextTrack = trackRegistry[queueIds[nextIdx]];
-    if (nextTrack) startPlaybackForTrack(nextTrack, false, 'skip');
-  }, [currentTrackId, queueIds, startPlaybackForTrack, trackRegistry]);
+    const queue = queueIdsRef.current;
+    if (queue.length === 0) return;
+
+    const curId = currentTrackIdRef.current;
+    const currentIndex = curId ? queue.indexOf(curId) : -1;
+
+    // When Shuffle is OFF, strictly play the next track sequentially in Queue order
+    if (!isShuffledRef.current) {
+      const nextIdx = currentIndex === -1 ? 0 : (currentIndex + 1) % queue.length;
+      const nextTrack = trackRegistryRef.current[queue[nextIdx]];
+      if (nextTrack) {
+        currentTrackIdRef.current = nextTrack.id;
+        startPlaybackForTrack(nextTrack, false, 'skip');
+      }
+      return;
+    }
+
+    // When Shuffle is ON, advance along the shuffled queue
+    const nextIdx = currentIndex === -1 ? 0 : (currentIndex + 1) % queue.length;
+    const nextTrack = trackRegistryRef.current[queue[nextIdx]];
+    if (nextTrack) {
+      currentTrackIdRef.current = nextTrack.id;
+      startPlaybackForTrack(nextTrack, false, 'skip');
+    }
+  }, [startPlaybackForTrack]);
 
   const seekTo = useCallback(
     (seconds: number) => {
@@ -1944,12 +2399,17 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return;
     }
 
-    if (queueIds.length === 0) return;
-    const idx = currentTrackId ? queueIds.indexOf(currentTrackId) : 0;
-    const prevIdx = idx - 1 >= 0 ? idx - 1 : queueIds.length - 1;
-    const prevTrack = trackRegistry[queueIds[prevIdx]];
-    if (prevTrack) startPlaybackForTrack(prevTrack, false, 'skip');
-  }, [currentTrackId, queueIds, seekTo, startPlaybackForTrack, trackRegistry]);
+    const queue = queueIdsRef.current;
+    if (queue.length === 0) return;
+    const curId = currentTrackIdRef.current;
+    const currentIndex = curId ? queue.indexOf(curId) : 0;
+    const prevIdx = currentIndex <= 0 ? queue.length - 1 : currentIndex - 1;
+    const prevTrack = trackRegistryRef.current[queue[prevIdx]];
+    if (prevTrack) {
+      currentTrackIdRef.current = prevTrack.id;
+      startPlaybackForTrack(prevTrack, false, 'skip');
+    }
+  }, [seekTo, startPlaybackForTrack]);
 
   const togglePlayPauseRef = useRef(togglePlayPause);
   togglePlayPauseRef.current = togglePlayPause;
@@ -1976,22 +2436,34 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const toggleShuffle = useCallback(() => {
-    setIsShuffled((prev) => {
-      const next = !prev;
-      const base = originalQueueIds.length > 0 ? originalQueueIds : queueIds;
-      if (next) {
-        const cur = currentTrackId;
-        const others = cur ? base.filter((id) => id !== cur) : base;
-        const shuffled = cur ? [cur, ...fisherYatesShuffle(others)] : fisherYatesShuffle(others);
-        setQueueIds(shuffled);
-        pushToast('True Shuffle aktif', 'success');
-      } else {
-        setQueueIds([...base]);
-        pushToast('Urutan antrean normal', 'info');
-      }
-      return next;
-    });
-  }, [currentTrackId, originalQueueIds, pushToast, queueIds]);
+    const next = !isShuffledRef.current;
+    isShuffledRef.current = next;
+    setIsShuffled(next);
+
+    const base =
+      originalQueueIdsRef.current.length > 0 ? originalQueueIdsRef.current : queueIdsRef.current;
+    if (next) {
+      const cur = currentTrackIdRef.current;
+      const anchorTrack = cur ? trackRegistryRef.current[cur] || null : null;
+      const otherTracks = (cur ? base.filter((id) => id !== cur) : base)
+        .map((id) => trackRegistryRef.current[id])
+        .filter((t): t is Track => Boolean(t));
+      const smartOrderedIds = smartShuffleTracks(
+        otherTracks,
+        listeningHistoryRef.current,
+        anchorTrack
+      ).map((t) => t.id);
+      const shuffled = cur ? [cur, ...smartOrderedIds] : smartOrderedIds;
+      queueIdsRef.current = shuffled;
+      setQueueIds(shuffled);
+      pushToast('Smart Shuffle aktif (hindari artis sama & sesuai riwayat)', 'success');
+    } else {
+      const restored = [...base];
+      queueIdsRef.current = restored;
+      setQueueIds(restored);
+      pushToast('Urutan antrean normal', 'info');
+    }
+  }, [pushToast]);
 
   const cycleLoopMode = useCallback(() => {
     setLoopMode((prev) => {
@@ -2027,34 +2499,63 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setIsBuffering(false);
   }, [clearHtml5Fade, clearYtFade]);
 
+  const clearSleepTimeout = useCallback(() => {
+    if (sleepTimeoutRef.current !== null) {
+      window.clearTimeout(sleepTimeoutRef.current);
+      sleepTimeoutRef.current = null;
+    }
+  }, []);
+
+  const triggerSleepStop = useCallback(() => {
+    clearSleepTimeout();
+    sleepTimerEndAtRef.current = null;
+    sleepTimerModeRef.current = 'off';
+    setSleepTimerMode('off');
+    setSleepTimerRemaining(null);
+    pauseActivePlayback();
+    pushToast('Sleep timer selesai — pemutaran dijeda', 'info');
+  }, [clearSleepTimeout, pauseActivePlayback, pushToast]);
+
   const setSleepTimerMinutes = useCallback(
     (minutes: number) => {
       const safeMinutes = Math.max(1, Math.min(240, Math.round(minutes)));
       const totalSeconds = safeMinutes * 60;
+      clearSleepTimeout();
       sleepTimerEndAtRef.current = Date.now() + totalSeconds * 1000;
       sleepTimerModeRef.current = 'countdown';
       setSleepTimerMode('countdown');
       setSleepTimerRemaining(totalSeconds);
+      sleepTimeoutRef.current = window.setTimeout(() => {
+        triggerSleepStop();
+      }, totalSeconds * 1000);
       pushToast(`Sleep timer diatur: ${safeMinutes} menit`, 'success');
     },
-    [pushToast]
+    [clearSleepTimeout, pushToast, triggerSleepStop]
   );
 
   const setSleepTimerEndOfTrack = useCallback(() => {
+    clearSleepTimeout();
     sleepTimerEndAtRef.current = null;
     sleepTimerModeRef.current = 'end_of_track';
     setSleepTimerMode('end_of_track');
     setSleepTimerRemaining(null);
     pushToast('Pemutaran akan dijeda saat lagu ini selesai', 'success');
-  }, [pushToast]);
+  }, [clearSleepTimeout, pushToast]);
 
   const cancelSleepTimer = useCallback(() => {
+    clearSleepTimeout();
     sleepTimerEndAtRef.current = null;
     sleepTimerModeRef.current = 'off';
     setSleepTimerMode('off');
     setSleepTimerRemaining(null);
     pushToast('Sleep timer dibatalkan', 'info');
-  }, [pushToast]);
+  }, [clearSleepTimeout, pushToast]);
+
+  useEffect(() => {
+    return () => {
+      clearSleepTimeout();
+    };
+  }, [clearSleepTimeout]);
 
   useEffect(() => {
     if (sleepTimerMode !== 'countdown') return;
@@ -2066,39 +2567,44 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setSleepTimerRemaining(remaining);
 
       if (remaining <= 0) {
-        sleepTimerEndAtRef.current = null;
-        sleepTimerModeRef.current = 'off';
-        setSleepTimerMode('off');
-        setSleepTimerRemaining(null);
-        pauseActivePlayback();
-        pushToast('Sleep timer selesai — pemutaran dijeda', 'info');
+        triggerSleepStop();
       }
     };
 
     tick();
     const timer = window.setInterval(tick, 500);
     return () => window.clearInterval(timer);
-  }, [sleepTimerMode, pauseActivePlayback, pushToast]);
+  }, [sleepTimerMode, triggerSleepStop]);
 
   const addToQueue = useCallback(
     (track: Track, playNextPosition = false) => {
       registerTracks([track]);
-      setOriginalQueueIds((prev) => (prev.includes(track.id) ? prev : [...prev, track.id]));
-      setQueueIds((prev) => {
-        const filtered = prev.filter((id) => id !== track.id);
-        if (playNextPosition && currentTrackId) {
-          const curIdx = filtered.indexOf(currentTrackId);
-          if (curIdx !== -1) {
-            const copy = [...filtered];
-            copy.splice(curIdx + 1, 0, track.id);
-            return copy;
-          }
+      const nextOrig = originalQueueIdsRef.current.includes(track.id)
+        ? originalQueueIdsRef.current
+        : [...originalQueueIdsRef.current, track.id];
+      originalQueueIdsRef.current = nextOrig;
+      setOriginalQueueIds(nextOrig);
+
+      const filtered = queueIdsRef.current.filter((id) => id !== track.id);
+      const curId = currentTrackIdRef.current;
+      let nextQueue: string[];
+      if (playNextPosition && curId) {
+        const curIdx = filtered.indexOf(curId);
+        if (curIdx !== -1) {
+          const copy = [...filtered];
+          copy.splice(curIdx + 1, 0, track.id);
+          nextQueue = copy;
+        } else {
+          nextQueue = [...filtered, track.id];
         }
-        return [...filtered, track.id];
-      });
+      } else {
+        nextQueue = [...filtered, track.id];
+      }
+      queueIdsRef.current = nextQueue;
+      setQueueIds(nextQueue);
       pushToast(`"${track.title}" ditambahkan ke antrean`, 'success');
     },
-    [currentTrackId, pushToast, registerTracks]
+    [pushToast, registerTracks]
   );
 
   const removeFromQueue = useCallback(
@@ -2109,17 +2615,20 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const nextList = [...currentList];
       nextList.splice(index, 1);
 
+      queueIdsRef.current = nextList;
       setQueueIds(nextList);
 
       if (targetId === currentTrackIdRef.current) {
         if (nextList.length > 0) {
           const replacement = trackRegistryRef.current[nextList[Math.min(index, nextList.length - 1)]];
           if (replacement) {
+            currentTrackIdRef.current = replacement.id;
             startPlaybackRef.current(replacement, false, 'skip');
             return;
           }
         }
         pauseActivePlayback();
+        currentTrackIdRef.current = null;
         setCurrentTrackId(null);
       }
     },
@@ -2127,29 +2636,31 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const reorderQueue = useCallback((fromIndex: number, toIndex: number) => {
-    setQueueIds((prev) => {
-      if (
-        fromIndex === toIndex ||
-        fromIndex < 0 ||
-        toIndex < 0 ||
-        fromIndex >= prev.length ||
-        toIndex >= prev.length
-      ) {
-        return prev;
-      }
-      const copy = [...prev];
-      const [moved] = copy.splice(fromIndex, 1);
-      copy.splice(toIndex, 0, moved);
-      return copy;
-    });
+    const prev = queueIdsRef.current;
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= prev.length ||
+      toIndex >= prev.length
+    ) {
+      return;
+    }
+    const copy = [...prev];
+    const [moved] = copy.splice(fromIndex, 1);
+    copy.splice(toIndex, 0, moved);
+    queueIdsRef.current = copy;
+    setQueueIds(copy);
   }, []);
 
   const clearUpcomingQueue = useCallback(() => {
-    setQueueIds((prev) =>
-      isPlayingRef.current && currentTrackId && prev.includes(currentTrackId) ? [currentTrackId] : []
-    );
+    const curId = currentTrackIdRef.current;
+    const nextQueue =
+      isPlayingRef.current && curId && queueIdsRef.current.includes(curId) ? [curId] : [];
+    queueIdsRef.current = nextQueue;
+    setQueueIds(nextQueue);
     pushToast('Antrean dibersihkan', 'info');
-  }, [currentTrackId, pushToast]);
+  }, [pushToast]);
 
   const openPlaylist = useCallback((playlistId: string) => {
     setSelectedPlaylistId(playlistId);
@@ -2376,6 +2887,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     loopMode,
     queueIds,
     queueTracks,
+    currentMood,
     ambientColor: ambientPalette.primary,
     ambientPalette,
     playTrack,
@@ -2398,6 +2910,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setSleepTimerEndOfTrack,
     cancelSleepTimer,
     activeEngine,
+    ambientVideoId,
     isAmbientVideoEnabled,
     setIsAmbientVideoEnabled,
     toggleAmbientVideo,
@@ -2420,46 +2933,76 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setIsTwinModalOpen,
     listeningHistory,
     simulateWeeklyAuraData,
+    themeMode,
+    resolvedTheme,
+    cycleThemeMode,
+    isDynamicThemeSync,
+    toggleDynamicThemeSync,
     toasts,
     pushToast,
   };
 
-  const showAmbientVideo =
+  const showHomeAmbientVideo =
+    !isZenMode &&
     isAmbientVideoEnabled &&
-    isPlaying &&
-    activeEngine === 'youtube' &&
+    Boolean(ambientVideoId) &&
     currentTrack?.sourceType !== 'local';
 
   return (
     <PlayerContext.Provider value={value}>
-      {/* Layer 0: Dual-Deck Ambient Music Video Backdrop behind Glass UI */}
+      {/* Hidden Dual-Deck YouTube IFrame Audio Engine (Official Audio synced with LRCLIB) */}
       <div
         aria-hidden="true"
-        className="fixed inset-0 z-0 pointer-events-none overflow-hidden bg-[#0B0B0D]"
+        className="fixed -left-[9999px] -top-[9999px] w-1 h-1 opacity-0 pointer-events-none overflow-hidden"
       >
+        {([0, 1] as const).map((deckIdx) => (
+          <div
+            key={deckIdx}
+            ref={(el) => {
+              ytDeckWrapperRefs.current[deckIdx] = el;
+            }}
+            className="w-full h-full [&>iframe]:w-full [&>iframe]:h-full"
+          />
+        ))}
+      </div>
+
+      {/* Layer 0: Subtle Soft Ambient Music Video + Frosted Glass Overlay behind Home / Explore / Library */}
+      <div
+        aria-hidden="true"
+        className="fixed inset-0 z-0 pointer-events-none overflow-hidden bg-[#F2F4F8] dark:bg-[#0B0B0D] transition-colors duration-300"
+      >
+        {showHomeAmbientVideo && ambientVideoId && (
+          <iframe
+            key={`home-mv-${ambientVideoId}`}
+            title="Nocty Subtle Ambient Music Video"
+            src={`https://www.youtube.com/embed/${ambientVideoId}?autoplay=1&mute=1&loop=1&playlist=${ambientVideoId}&controls=0&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1`}
+            allow="autoplay; encrypted-media; picture-in-picture"
+            tabIndex={-1}
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full w-[177.78vh] h-[56.25vw] scale-125 opacity-20 blur-xl pointer-events-none border-0"
+          />
+        )}
         <div
-          className={`absolute inset-0 transition-opacity duration-1000 ease-out ${
-            showAmbientVideo ? 'opacity-35' : 'opacity-0'
+          className={`absolute inset-0 transition-all duration-700 ${
+            showHomeAmbientVideo
+              ? resolvedTheme === 'light'
+                ? 'bg-[#F2F4F8]/78 backdrop-blur-md'
+                : 'bg-[#0B0B0D]/75 backdrop-blur-md'
+              : 'blur-3xl'
           }`}
-        >
-          {([0, 1] as const).map((deckIdx) => (
-            <div
-              key={deckIdx}
-              ref={(el) => {
-                ytDeckWrapperRefs.current[deckIdx] = el;
-              }}
-              className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full w-[177.78vh] h-[56.25vw] scale-125 blur-xl [&>iframe]:w-full [&>iframe]:h-full [&>iframe]:pointer-events-none transition-opacity duration-1000 ${
-                activeYtDeck === deckIdx ? 'opacity-100 z-10' : 'opacity-0 z-0'
-              }`}
-            />
-          ))}
-        </div>
-        <div
-          className={`absolute inset-0 transition-opacity duration-1000 ${
-            showAmbientVideo
-              ? 'bg-gradient-to-b from-black/40 via-black/60 to-black/85'
-              : 'bg-gradient-to-b from-[#0B0B0D]/60 via-[#0B0B0D]/80 to-[#0B0B0D]'
-          }`}
+          style={
+            !showHomeAmbientVideo
+              ? {
+                  opacity:
+                    resolvedTheme === 'light'
+                      ? Math.min(0.5, ambientPalette.gradientIntensity * 0.9)
+                      : Math.min(0.62, ambientPalette.gradientIntensity),
+                  background: `
+                    radial-gradient(circle at 20% 15%, rgba(${ambientPalette.primary.r}, ${ambientPalette.primary.g}, ${ambientPalette.primary.b}, 0.65) 0%, transparent 58%),
+                    radial-gradient(circle at 82% 78%, rgba(${ambientPalette.secondary.r}, ${ambientPalette.secondary.g}, ${ambientPalette.secondary.b}, 0.55) 0%, transparent 58%)
+                  `,
+                }
+              : undefined
+          }
         />
       </div>
       {children}

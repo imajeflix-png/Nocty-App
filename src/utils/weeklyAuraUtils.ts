@@ -1,6 +1,7 @@
 import { AmbientPalette, Track } from '../types/music';
 import { ListeningHistoryEntry } from '../services/storageDb';
 import { EMERGENCY_FALLBACK_TRACKS } from '../data/moods';
+import { buildAmbientPalette } from './audioUtils';
 
 export interface WeeklyTopTrack {
   trackId: string;
@@ -136,10 +137,11 @@ export function analyzeWeeklyAura(history: ListeningHistoryEntry[]): WeeklyAuraR
   let auraTitle = 'Overthinking Romantis';
   let auraNarrative =
     'Kamu sering memutar ulang nada-nada yang terasa dekat dengan isi kepalamu di jam sunyi. Minggu ini hatimu lembut, penuh nostalgia, dan sangat peka pada setiap bait lirik.';
-  let auraPalette: AmbientPalette = {
-    primary: { r: 129, g: 140, b: 248, hex: '#818CF8' },
-    secondary: { r: 244, g: 114, b: 182, hex: '#F472B6' },
-  };
+  let auraPalette: AmbientPalette = buildAmbientPalette(
+    { r: 129, g: 140, b: 248, hex: '#818CF8' },
+    { r: 244, g: 114, b: 182, hex: '#F472B6' },
+    0.72
+  );
 
   const maxTrackPlays = topTracks[0]?.playCount || 0;
   const isHeavyRepeater = maxTrackPlays >= 3 || (weekEntries.length > 0 && trackMap.size / weekEntries.length < 0.55);
@@ -153,18 +155,20 @@ export function analyzeWeeklyAura(history: ListeningHistoryEntry[]): WeeklyAuraR
       auraTitle = 'Overthinking Romantis';
       auraNarrative =
         'Satu lagu favorit diputar berulang-ulang di jam sunyi, seolah menyimpan cerita yang belum sempat terucap. Minggu ini kamu merayakan perasaanmu dengan tenang di balik headset.';
-      auraPalette = {
-        primary: { r: 139, g: 92, b: 246, hex: '#8B5CF6' },
-        secondary: { r: 236, g: 72, b: 153, hex: '#EC4899' },
-      };
+      auraPalette = buildAmbientPalette(
+        { r: 139, g: 92, b: 246, hex: '#8B5CF6' },
+        { r: 236, g: 72, b: 153, hex: '#EC4899' },
+        0.74
+      );
     } else {
       auraTitle = 'Midnight Main Character';
       auraNarrative =
         'Menyusuri larut malam dengan soundtrack sinematik yang mengalir tanpa henti. Setiap pergantian lagu minggu ini terasa seperti adegan film pribadimu.';
-      auraPalette = {
-        primary: { r: 99, g: 102, b: 241, hex: '#6366F1' },
-        secondary: { r: 56, g: 189, b: 248, hex: '#38BDF8' },
-      };
+      auraPalette = buildAmbientPalette(
+        { r: 99, g: 102, b: 241, hex: '#6366F1' },
+        { r: 56, g: 189, b: 248, hex: '#38BDF8' },
+        0.7
+      );
     }
   } else if (dominantBucket === 'goldenHour') {
     personaLabel = 'Golden Hour Melancholic';
@@ -174,10 +178,11 @@ export function analyzeWeeklyAura(history: ListeningHistoryEntry[]): WeeklyAuraR
     auraTitle = 'Soft Hearted Dreamer';
     auraNarrative =
       'Selalu menemukan ruang tenang di antara warna senja dan musik yang menyentuh hati. Minggu ini energimu lembut, puitis, dan penuh rasa syukur.';
-    auraPalette = {
-      primary: { r: 251, g: 146, b: 60, hex: '#FB923C' },
-      secondary: { r: 244, g: 63, b: 94, hex: '#F43F5E' },
-    };
+    auraPalette = buildAmbientPalette(
+      { r: 251, g: 146, b: 60, hex: '#FB923C' },
+      { r: 244, g: 63, b: 94, hex: '#F43F5E' },
+      0.76
+    );
   } else if (dominantBucket === 'morning') {
     personaLabel = 'Morning Hustler';
     personaRange = '06:00 – 10:00';
@@ -186,10 +191,11 @@ export function analyzeWeeklyAura(history: ListeningHistoryEntry[]): WeeklyAuraR
     auraTitle = 'Main Character Energy';
     auraNarrative =
       'Langkahmu minggu ini terasa ringan dan terarah dengan deretan lagu pembangkit mood sejak pagi. Kamu tahu persis bagaimana menyetel frekuensi terbaik untuk dirimu sendiri.';
-    auraPalette = {
-      primary: { r: 52, g: 211, b: 153, hex: '#34D399' },
-      secondary: { r: 59, g: 130, b: 246, hex: '#3B82F6' },
-    };
+    auraPalette = buildAmbientPalette(
+      { r: 52, g: 211, b: 153, hex: '#34D399' },
+      { r: 59, g: 130, b: 246, hex: '#3B82F6' },
+      0.72
+    );
   } else if (dominantBucket === 'midday') {
     personaLabel = 'Daylight Voyager';
     personaRange = '11:00 – 15:00';
@@ -198,10 +204,11 @@ export function analyzeWeeklyAura(history: ListeningHistoryEntry[]): WeeklyAuraR
     auraTitle = 'Main Character Energy';
     auraNarrative =
       'Penuh eksplorasi melodi baru dan menjaga momentum tetap stabil sepanjang minggu. Kurasi musikmu menunjukkan pikiran yang terbuka dan selera yang segar.';
-    auraPalette = {
-      primary: { r: 56, g: 189, b: 248, hex: '#38BDF8' },
-      secondary: { r: 168, g: 85, b: 247, hex: '#A855F7' },
-    };
+    auraPalette = buildAmbientPalette(
+      { r: 56, g: 189, b: 248, hex: '#38BDF8' },
+      { r: 168, g: 85, b: 247, hex: '#A855F7' },
+      0.74
+    );
   } else {
     personaLabel = 'Velvet Evening Listener';
     personaRange = '20:00 – 22:59';
@@ -210,10 +217,11 @@ export function analyzeWeeklyAura(history: ListeningHistoryEntry[]): WeeklyAuraR
     auraTitle = 'Soft Hearted Dreamer';
     auraNarrative =
       'Hangat, intim, dan penuh perhatian terhadap detail setiap aransemen lagu. Minggu ini musik menjadi tempat pulang paling nyaman untukmu.';
-    auraPalette = {
-      primary: { r: 192, g: 132, b: 252, hex: '#C084FC' },
-      secondary: { r: 251, g: 113, b: 133, hex: '#FB7185' },
-    };
+    auraPalette = buildAmbientPalette(
+      { r: 192, g: 132, b: 252, hex: '#C084FC' },
+      { r: 251, g: 113, b: 133, hex: '#FB7185' },
+      0.72
+    );
   }
 
   const personaUnified =

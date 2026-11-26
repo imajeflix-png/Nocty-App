@@ -1,8 +1,9 @@
 <!doctype html>
-<html lang="id" class="dark">
+<html lang="id">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0B0B0D" />
     <title>Nocty — Immersive Music Player</title>
     <meta
       name="description"
@@ -26,6 +27,29 @@
       rel="stylesheet"
     />
     <script>
+      (function () {
+        try {
+          var savedMode = localStorage.getItem('nocty_theme_mode');
+          var prefersDark =
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var resolved =
+            savedMode === 'light' || savedMode === 'dark'
+              ? savedMode
+              : prefersDark
+                ? 'dark'
+                : 'light';
+          var root = document.documentElement;
+          root.classList.remove('light', 'dark');
+          root.classList.add(resolved);
+          root.style.colorScheme = resolved;
+          var metaTheme = document.querySelector('meta[name="theme-color"]');
+          if (metaTheme) {
+            metaTheme.setAttribute('content', resolved === 'dark' ? '#0B0B0D' : '#F2F4F8');
+          }
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
       window.addEventListener(
         'error',
         function (event) {
@@ -40,7 +64,7 @@
       );
     </script>
   </head>
-  <body class="bg-[#0B0B0D] text-[#F5F5F7] antialiased selection:bg-white/25 selection:text-white">
+  <body class="bg-[#F2F4F8] dark:bg-[#0B0B0D] text-[#111318] dark:text-[#F5F5F7] antialiased selection:bg-slate-900/15 dark:selection:bg-white/25 selection:text-[#111318] dark:selection:text-white transition-colors duration-300">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

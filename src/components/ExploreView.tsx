@@ -1,7 +1,13 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Search, Upload, X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Clock, History, Loader2, Search, Upload, X } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 import { searchOnlineTracks } from '../services/musicApi';
+import {
+  addRecentSearch,
+  clearRecentSearches,
+  loadRecentSearches,
+  removeRecentSearch,
+} from '../services/storageDb';
 import { Track } from '../types/music';
 import { TrackRow } from './TrackRow';
 
@@ -42,7 +48,30 @@ export const ExploreView: React.FC = () => {
   const [activeChannel, setActiveChannel] = useState<CuratedChannelId>('indonesia');
   const [channelTracks, setChannelTracks] = useState<Track[]>([]);
   const [isChannelLoading, setIsChannelLoading] = useState(false);
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => loadRecentSearches());
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const recordRecentSearch = useCallback((query: string) => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return;
+    setRecentSearches((prev) => addRecentSearch(trimmed, prev));
+  }, []);
+
+  const handleSelectRecentSearch = useCallback(
+    (term: string) => {
+      setSearchQuery(term);
+      recordRecentSearch(term);
+    },
+    [recordRecentSearch, setSearchQuery]
+  );
+
+  const handleRemoveRecentSearch = useCallback((term: string) => {
+    setRecentSearches((prev) => removeRecentSearch(term, prev));
+  }, []);
+
+  const handleClearRecentSearches = useCallback(() => {
+    setRecentSearches(clearRecentSearches());
+  }, []);
 
   const localMatches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -116,6 +145,18 @@ export const ExploreView: React.FC = () => {
       controller.abort();
     };
   }, [searchQuery, registerTracks]);
+
+  // Persist settled search queries (>= 2 chars) to Recent Searches (max 10 in localStorage)
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (trimmed.length < 2) return;
+
+    const settleTimer = window.setTimeout(() => {
+      recordRecentSearch(trimmed);
+    }, 850);
+
+    return () => window.clearTimeout(settleTimer);
+  }, [searchQuery, recordRecentSearch]);
 
   // Dynamic Curated Browse Feed when Search Input is empty
   useEffect(() => {
@@ -204,6 +245,11 @@ export const ExploreView: React.FC = () => {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                recordRecentSearch(searchQuery);
+              }
+            }}
             placeholder="Ketik judul, artis, atau lirik..."
             aria-label="Cari lagu, artis, atau lirik"
             className="w-full h-11 pl-11 pr-10 rounded-full bg-white/[0.06] border border-white/[0.08] text-sm text-white placeholder-white/40 focus:outline-none focus:border-white/25"
@@ -243,6 +289,71 @@ export const ExploreView: React.FC = () => {
             );
           })}
         </div>
+
+        {/* Recent Searches: Horizontal Clickable Chips (last 10 queries persisted in localStorage) */}
+        {recentSearches.length > 0 && (
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center justify-between gap-2">
+              <div className="inline-flex items-center gap-1.5 text-xs font-medium text-white/60">
+                <History className="w-3.5 h-3.5 text-white/50" strokeWidth={1.9} />
+                <span>Pencarian Terakhir</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleClearRecentSearches}
+                className="text-[11px] font-medium text-white/45 hover:text-white/80 transition-colors"
+              >
+                Hapus Semua
+              </button>
+            </div>
+            <div
+              className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1"
+              role="list"
+              aria-label="Pencarian terakhir"
+            >
+              {recentSearches.map((term) => {
+                const isActiveTerm = searchQuery.trim().toLowerCase() === term.toLowerCase();
+                return (
+                  <div
+                    key={term}
+                    role="listitem"
+                    className={`inline-flex items-center rounded-full border transition-colors shrink-0 ${
+                      isActiveTerm
+                        ? 'bg-white text-[#0B0B0D] border-white'
+                        : 'bg-white/[0.06] hover:bg-white/[0.11] text-white/85 border-white/[0.08]'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleSelectRecentSearch(term)}
+                      className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 text-xs font-medium whitespace-nowrap"
+                    >
+                      <Clock
+                        className={`w-3 h-3 shrink-0 ${
+                          isActiveTerm ? 'text-[#0B0B0D]/70' : 'text-white/45'
+                        }`}
+                        strokeWidth={2}
+                      />
+                      <span className="max-w-[160px] truncate">{term}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveRecentSearch(term)}
+                      aria-label={`Hapus ${term} dari pencarian terakhir`}
+                      className={`p-1 mr-1 rounded-full transition-colors ${
+                        isActiveTerm
+                          ? 'text-[#0B0B0D]/60 hover:text-[#0B0B0D] hover:bg-black/10'
+                          : 'text-white/40 hover:text-white hover:bg-white/10'
+                      }`}
+                    >
+                      <X className="w-3 h-3" strokeWidth={2} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Section 1: Koleksi Lokal */}

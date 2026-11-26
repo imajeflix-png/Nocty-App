@@ -5,6 +5,7 @@ import { formatDuration } from '../utils/audioUtils';
 import { CoverArt } from './CoverArt';
 import { EqualizerBars } from './EqualizerBars';
 import { SyncedLyricsList } from './SyncedLyricsList';
+import { AppleEmoji } from './AppleEmoji';
 
 export const RightInspectorPanel: React.FC = () => {
   const {
@@ -12,6 +13,7 @@ export const RightInspectorPanel: React.FC = () => {
     setRightPanelTab,
     queueTracks,
     currentTrack,
+    currentMood,
     isPlaying,
     playTrack,
     removeFromQueue,
@@ -94,17 +96,27 @@ export const RightInspectorPanel: React.FC = () => {
           <SyncedLyricsList variant="panel" />
         ) : (
           <div className="h-full flex flex-col">
-            <div className="px-4 py-2.5 flex items-center justify-between border-b border-white/[0.06]">
-              <span className="text-xs text-white/50">Seret lagu untuk ubah urutan</span>
-              {queueTracks.length > 1 && (
-                <button
-                  type="button"
-                  onClick={clearUpcomingQueue}
-                  className="text-xs text-white/55 hover:text-white transition-colors"
-                >
-                  Bersihkan
-                </button>
+            <div className="px-4 py-2.5 flex flex-col gap-2 border-b border-white/[0.06]">
+              {currentMood && (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.08] border border-white/[0.10] text-[11px] font-medium text-white/90">
+                    <AppleEmoji unified={currentMood.emojiUnified} size={13} />
+                    <span>{currentMood.badgeText}</span>
+                  </div>
+                </div>
               )}
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-white/50">Seret lagu untuk ubah urutan</span>
+                {queueTracks.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={clearUpcomingQueue}
+                    className="text-xs text-white/55 hover:text-white transition-colors"
+                  >
+                    Bersihkan
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-2.5 space-y-1">

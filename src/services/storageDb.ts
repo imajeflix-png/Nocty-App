@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   AMBIENT_VIDEO: 'nocty_ambient_video',
   AUTOPLAY: 'nocty_autoplay',
   LISTENING_HISTORY: 'nocty_listening_history',
+  RECENT_SEARCHES: 'nocty_recent_searches_v1',
 };
 
 export interface ListeningHistoryEntry {
@@ -364,4 +365,73 @@ export function saveListeningHistory(entries: ListeningHistoryEntry[]): void {
   }
 }
 
+const MAX_RECENT_SEARCHES = 10;
 
+function sanitizeRecentSearches(items: unknown[]): string[] {
+  const seen = new Set<string>();
+  const cleaned: string[] = [];
+
+  for (const item of items) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (trimmed.length < 2) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push(trimmed);
+    if (cleaned.length >= MAX_RECENT_SEARCHES) break;
+  }
+
+  return cleaned;
+}
+
+export function loadRecentSearches(): string[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.RECENT_SEARCHES);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? sanitizeRecentSearches(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveRecentSearches(queries: string[]): void {
+  try {
+    const sanitized = sanitizeRecentSearches(queries);
+    localStorage.setItem(STORAGE_KEYS.RECENT_SEARCHES, JSON.stringify(sanitized));
+  } catch {
+    // Ignore quota errors
+  }
+}
+
+export function addRecentSearch(query: string, existing?: string[]): string[] {
+  const trimmed = query.trim();
+  const base = existing ?? loadRecentSearches();
+  if (trimmed.length < 2) return base;
+
+  const lower = trimmed.toLowerCase();
+  const next = [trimmed, ...base.filter((item) => item.toLowerCase() !== lower)].slice(
+    0,
+    MAX_RECENT_SEARCHES
+  );
+  saveRecentSearches(next);
+  return next;
+}
+
+export function removeRecentSearch(query: string, existing?: string[]): string[] {
+  const lower = query.trim().toLowerCase();
+  const base = existing ?? loadRecentSearches();
+  const next = base.filter((item) => item.toLowerCase() !== lower);
+  saveRecentSearches(next);
+  return next;
+}
+
+export function clearRecentSearches(): string[] {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.RECENT_SEARCHES);
+  } catch {
+    // Ignore storage errors
+  }
+  return [];
+}

@@ -226,6 +226,8 @@ export async function searchYouTubeTracks(
   return items.filter((item) => Boolean(item.videoId && item.title)).map(mapApiTrack);
 }
 
+const resolvedMusicVideoIdCache = new Map<string, string>();
+
 /**
  * Resolves the best embeddable YouTube videoId in the background for any iTunes/JioSaavn track.
  */
@@ -247,6 +249,50 @@ export async function resolveYouTubeVideoId(
     const best = candidates[0]?.videoId || null;
     if (best) {
       resolvedVideoIdCache.set(cacheKey, best);
+    }
+    return best;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves a real moving Official Music Video videoId for Ambient Video Backdrop.
+ */
+export async function resolveYouTubeMusicVideoId(
+  artist: string,
+  title: string,
+  externalSignal?: AbortSignal
+): Promise<string | null> {
+  const cleanTitle = title.replace(/\s*\([^)]*\)/g, '').trim();
+  const cleanArtist = artist.split(/,|&|\bfeat\.?\b|\bft\.?\b/i)[0].trim();
+  const cacheKey = `mv::${cleanArtist.toLowerCase()}::${cleanTitle.toLowerCase()}`;
+
+  const cached = resolvedMusicVideoIdCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const query = `${cleanArtist} ${cleanTitle} official music video`;
+    const candidates = await searchYouTubeTracks(query, externalSignal, 8);
+    const preferred =
+      candidates.find((c) => {
+        const t = c.title.toLowerCase();
+        return (
+          (t.includes('official music video') ||
+            t.includes('official video') ||
+            t.includes('music video') ||
+            t.includes('mv')) &&
+          !t.includes('official audio') &&
+          !t.includes('lyrics')
+        );
+      }) ||
+      candidates.find((c) => !c.title.toLowerCase().includes('official audio')) ||
+      candidates[0] ||
+      null;
+
+    const best = preferred?.videoId || null;
+    if (best) {
+      resolvedMusicVideoIdCache.set(cacheKey, best);
     }
     return best;
   } catch {

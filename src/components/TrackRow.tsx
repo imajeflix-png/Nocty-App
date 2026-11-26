@@ -13,6 +13,7 @@ interface TrackRowProps {
   contextTracks: Track[];
   lyricSnippet?: string;
   playlistIdContext?: string;
+  preserveQueueOrder?: boolean;
 }
 
 export const TrackRow: React.FC<TrackRowProps> = ({
@@ -21,6 +22,7 @@ export const TrackRow: React.FC<TrackRowProps> = ({
   contextTracks,
   lyricSnippet,
   playlistIdContext,
+  preserveQueueOrder = false,
 }) => {
   const { currentTrack, isPlaying, isBuffering, playTrack, toggleLike, isLiked } = usePlayer();
 
@@ -31,11 +33,17 @@ export const TrackRow: React.FC<TrackRowProps> = ({
     <div
       role="button"
       tabIndex={0}
-      onClick={() => playTrack(track, contextTracks)}
+      onClick={() =>
+        playTrack(track, contextTracks, preserveQueueOrder ? { preserveOrder: true } : undefined)
+      }
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          playTrack(track, contextTracks);
+          playTrack(
+            track,
+            contextTracks,
+            preserveQueueOrder ? { preserveOrder: true } : undefined
+          );
         }
       }}
       className={`group flex items-center gap-3.5 px-3 py-2.5 rounded-xl transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
@@ -70,7 +78,7 @@ export const TrackRow: React.FC<TrackRowProps> = ({
           roundedClass="rounded-lg"
         />
         <div
-          className={`absolute inset-0 rounded-lg bg-black/55 flex items-center justify-center transition-opacity duration-150 ${
+          className={`on-artwork absolute inset-0 rounded-lg bg-black/55 flex items-center justify-center transition-opacity duration-150 ${
             isActive ? 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}
         >

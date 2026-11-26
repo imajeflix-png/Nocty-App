@@ -11,7 +11,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "android:permissions": "node scripts/setup-android-permissions.mjs",
-    "android:setup": "npx cap add android && node scripts/setup-android-permissions.mjs && npx cap sync android"
+    "android:dynamic-island": "node scripts/setup-android-dynamic-island.mjs",
+    "android:setup": "npx cap add android && node scripts/setup-android-permissions.mjs && node scripts/setup-android-dynamic-island.mjs && npx cap sync android"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

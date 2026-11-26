@@ -4,9 +4,13 @@ import { usePlayer } from '../context/PlayerContext';
 
 interface SyncedLyricsListProps {
   variant?: 'panel' | 'zen';
+  hideActionButtons?: boolean;
 }
 
-export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'panel' }) => {
+export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({
+  variant = 'panel',
+  hideActionButtons = false,
+}) => {
   const {
     currentTrack,
     currentTime,
@@ -39,9 +43,15 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
 
   useEffect(() => {
     if (activeIndex < 0 || userScrolling) return;
+    const container = containerRef.current;
     const el = lineRefs.current[activeIndex];
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (container && el) {
+      const targetTop =
+        el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2;
+      container.scrollTo({
+        top: Math.max(0, targetTop),
+        behavior: 'smooth',
+      });
     }
   }, [activeIndex, userScrolling]);
 
@@ -91,24 +101,33 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
     <div className="h-full flex flex-col">
       {/* Social Actions & Lyric Offset Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-white/[0.06] bg-white/[0.02] shrink-0 text-xs text-white/60">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setIsWhisperComposerOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-[#0B0B0D] hover:bg-white/90 text-xs font-semibold transition-colors whitespace-nowrap"
-          >
-            <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />
-            <span>Kirim Whisper</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsLyricCardOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/16 border border-white/[0.10] text-xs font-medium text-white transition-colors whitespace-nowrap"
-          >
-            <Share2 className="w-3.5 h-3.5" strokeWidth={1.9} />
-            <span>Share Kartu Lirik</span>
-          </button>
-        </div>
+        {hideActionButtons ? (
+          <div className="flex items-center gap-2">
+            <Mic2 className="w-3.5 h-3.5 text-white/75" strokeWidth={1.9} />
+            <span className="font-display text-xs sm:text-sm font-semibold text-white">
+              Lirik Tersinkronisasi
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setIsWhisperComposerOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-[#0B0B0D] hover:bg-white/90 text-xs font-semibold transition-colors whitespace-nowrap"
+            >
+              <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />
+              <span>Kirim Whisper</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsLyricCardOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/16 border border-white/[0.10] text-xs font-medium text-white transition-colors whitespace-nowrap"
+            >
+              <Share2 className="w-3.5 h-3.5" strokeWidth={1.9} />
+              <span>Share Kartu Lirik</span>
+            </button>
+          </div>
+        )}
 
         {syncedLines.length > 0 && (
           <div className="flex items-center gap-1 ml-auto">
@@ -142,8 +161,8 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
           ref={containerRef}
           onWheel={handleManualScroll}
           onTouchMove={handleManualScroll}
-          className={`flex-1 min-h-0 overflow-y-auto scroll-smooth ${
-            variant === 'zen' ? 'px-2 sm:px-6 py-12 space-y-5' : 'px-4 py-6 space-y-3'
+          className={`relative flex-1 min-h-0 overflow-y-auto scroll-smooth ${
+            variant === 'zen' ? 'px-3 sm:px-6 py-8 space-y-4' : 'px-4 py-6 space-y-3'
           }`}
         >
           {syncedLines.map((line, index) => {
@@ -154,10 +173,10 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
             const zenBlurClass =
               variant === 'zen'
                 ? isCurrent
-                  ? 'blur-0 opacity-100 scale-[1.02]'
+                  ? 'blur-0 opacity-100 scale-[1.01]'
                   : distance === 1
-                    ? 'blur-[0.6px] opacity-55 hover:blur-0 hover:opacity-90'
-                    : 'blur-[1.6px] opacity-30 hover:blur-0 hover:opacity-85'
+                    ? 'blur-[0.4px] opacity-60 hover:blur-0 hover:opacity-90'
+                    : 'blur-[1.2px] opacity-35 hover:blur-0 hover:opacity-85'
                 : isCurrent
                   ? 'opacity-100'
                   : isPast
@@ -176,13 +195,13 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
                   seekTo(Math.max(0, line.time - lyricOffset));
                 }}
                 className={`w-full text-left rounded-xl transition-all duration-300 origin-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
-                  variant === 'zen' ? 'px-3 py-2' : 'px-2.5 py-1.5 hover:bg-white/[0.06]'
+                  variant === 'zen' ? 'px-2.5 py-1.5' : 'px-2.5 py-1.5 hover:bg-white/[0.06]'
                 } ${zenBlurClass}`}
               >
                 <span
                   className={`block leading-snug transition-colors ${
                     variant === 'zen'
-                      ? 'font-display text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight'
+                      ? 'font-display text-lg sm:text-xl font-bold tracking-tight'
                       : 'font-display text-[15px] sm:text-base font-semibold'
                   } ${isCurrent ? 'text-white drop-shadow-[0_2px_16px_rgba(255,255,255,0.28)]' : 'text-white/80'}`}
                 >

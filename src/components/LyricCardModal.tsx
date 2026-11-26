@@ -231,7 +231,7 @@ export const LyricCardModal: React.FC = () => {
               <Loader2 className="w-6 h-6 text-white/70 animate-spin" />
             )}
             {isRendering && previewDataUrl && (
-              <div className="absolute inset-0 bg-black/35 backdrop-blur-[2px] flex items-center justify-center">
+              <div className="on-artwork absolute inset-0 bg-black/35 backdrop-blur-[2px] flex items-center justify-center">
                 <Loader2 className="w-5 h-5 text-white animate-spin" />
               </div>
             )}

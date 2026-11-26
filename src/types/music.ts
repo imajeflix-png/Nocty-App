@@ -47,6 +47,9 @@ export interface AmbientColor {
 export interface AmbientPalette {
   primary: AmbientColor;
   secondary: AmbientColor;
+  vibrancy: number;
+  gradientIntensity: number;
+  accentContrast: '#0B0B0D' | '#FFFFFF';
 }
 
 export interface MoodCategory {

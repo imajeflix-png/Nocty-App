@@ -1,12 +1,64 @@
-import React, { useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Heart, Loader2, Pause, Play } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Heart, Loader2, Pause, Play, X } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 import { MOOD_CATEGORIES } from '../data/moods';
 import { searchOnlineTracks } from '../services/musicApi';
 import { MoodCategory, Track } from '../types/music';
+import { TrackMoodId, detectTrackMood } from '../utils/audioUtils';
+import { AppleEmoji } from './AppleEmoji';
 import { CoverArt } from './CoverArt';
 import { EqualizerBars } from './EqualizerBars';
 import { TrackRow } from './TrackRow';
+
+type VibePreset = 'chill' | 'upbeat' | 'focus';
+
+const VIBE_PRESETS: Array<{
+  id: VibePreset;
+  label: string;
+  emojiUnified: string;
+  description: string;
+}> = [
+  {
+    id: 'chill',
+    label: 'Chill',
+    emojiUnified: '1f319',
+    description: 'Santai & larut malam',
+  },
+  {
+    id: 'upbeat',
+    label: 'Upbeat',
+    emojiUnified: '1f525',
+    description: 'Enerjik & euforia',
+  },
+  {
+    id: 'focus',
+    label: 'Focus',
+    emojiUnified: '1f3a7',
+    description: 'Akustik & instrumental',
+  },
+];
+
+const VIBE_TIER_ORDER: Record<VibePreset, TrackMoodId[]> = {
+  chill: ['chill', 'melancholic', 'focus', 'upbeat'],
+  upbeat: ['upbeat', 'chill', 'melancholic', 'focus'],
+  focus: ['focus', 'chill', 'melancholic', 'upbeat'],
+};
+
+function sortTracksByVibe(tracks: Track[], vibe: VibePreset | null): Track[] {
+  if (!vibe || tracks.length <= 1) return tracks;
+  const order = VIBE_TIER_ORDER[vibe];
+  return tracks
+    .map((track, idx) => ({
+      track,
+      idx,
+      rank: order.indexOf(detectTrackMood(track).mood),
+    }))
+    .sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      return a.idx - b.idx;
+    })
+    .map((entry) => entry.track);
+}
 
 interface HorizontalShelfProps {
   title: string;
@@ -96,7 +148,7 @@ const HorizontalTrackShelf: React.FC<HorizontalShelfProps> = ({ title, tracks, i
                   />
 
                   <span
-                    className={`absolute right-2.5 bottom-2.5 w-10 h-10 rounded-full bg-white text-[#0B0B0D] flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.5)] transition-all duration-200 ${
+                    className={`on-artwork absolute right-2.5 bottom-2.5 w-10 h-10 rounded-full bg-white text-[#0B0B0D] flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.5)] transition-all duration-200 ${
                       active
                         ? 'opacity-100 translate-y-0'
                         : 'opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0'
@@ -139,16 +191,37 @@ export const HomeView: React.FC = () => {
     isLiked,
     pushToast,
     registerTracks,
+    setIsTwinModalOpen,
+    setIsWeeklyAuraOpen,
+    isDynamicThemeSync,
   } = usePlayer();
 
   const [loadingMoodId, setLoadingMoodId] = useState<string | null>(null);
   const [activeMoodTitle, setActiveMoodTitle] = useState<string | null>(null);
   const [moodTracks, setMoodTracks] = useState<Track[]>([]);
+  const [vibeFilter, setVibeFilter] = useState<VibePreset | null>(null);
 
   const heroPool = indonesiaTrending.length > 0 ? indonesiaTrending : featuredTracks;
   const heroTrack = heroPool[0] || null;
   const quickPicks = heroPool.slice(0, 6);
-  const { primary, secondary } = ambientPalette;
+  const { primary, secondary, gradientIntensity } = ambientPalette;
+
+  const sortedIndonesiaCharts = useMemo(
+    () => sortTracksByVibe(indonesiaTrending, vibeFilter),
+    [indonesiaTrending, vibeFilter]
+  );
+  const sortedGlobalCharts = useMemo(
+    () => sortTracksByVibe(featuredTracks, vibeFilter),
+    [featuredTracks, vibeFilter]
+  );
+  const sortedViralCharts = useMemo(
+    () => sortTracksByVibe(viralTracks, vibeFilter),
+    [viralTracks, vibeFilter]
+  );
+  const sortedIndieCharts = useMemo(
+    () => sortTracksByVibe(indieRnbTracks, vibeFilter),
+    [indieRnbTracks, vibeFilter]
+  );
 
   const isHeroActive = Boolean(heroTrack && currentTrack?.id === heroTrack.id);
   const isHeroPlaying = isHeroActive && isPlaying;
@@ -195,15 +268,17 @@ export const HomeView: React.FC = () => {
             {/* Soft Ambient Cover Glow */}
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute -top-16 -left-10 w-80 h-80 rounded-full blur-3xl opacity-30 transition-all duration-1000"
+              className="pointer-events-none absolute -top-16 -left-10 w-80 h-80 rounded-full blur-3xl transition-all duration-1000"
               style={{
+                opacity: Math.min(0.62, gradientIntensity * 1.05),
                 background: `radial-gradient(circle, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.95) 0%, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.55) 45%, transparent 72%)`,
               }}
             />
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute -bottom-20 right-0 w-72 h-72 rounded-full blur-3xl opacity-20 transition-all duration-1000"
+              className="pointer-events-none absolute -bottom-20 right-0 w-72 h-72 rounded-full blur-3xl transition-all duration-1000"
               style={{
+                opacity: Math.min(0.45, gradientIntensity * 0.78),
                 background: `radial-gradient(circle, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.9) 0%, transparent 70%)`,
               }}
             />
@@ -340,31 +415,136 @@ export const HomeView: React.FC = () => {
         )}
       </section>
 
+      {/* Row 1.5: 2-Column Apple Glass Social Feature Cards (Nocty Twin & Weekly Aura) */}
+      <section aria-label="Fitur Sosial Nocty" className="grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => setIsTwinModalOpen(true)}
+          className="group relative overflow-hidden rounded-2xl bg-white/[0.06] hover:bg-white/[0.10] backdrop-blur-xl border border-white/[0.10] p-3.5 sm:p-4 text-left transition-all duration-150 active:scale-[0.98]"
+        >
+          <div className="flex items-start gap-2.5 sm:gap-3">
+            <span className="w-10 h-10 rounded-xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center shrink-0">
+              <AppleEmoji unified="1f3a7" size={20} alt="Nocty Twin" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="font-display text-sm sm:text-[15px] font-bold text-white truncate">
+                Nocty Twin
+              </p>
+              <p className="mt-0.5 text-xs text-white/60 leading-snug line-clamp-2">
+                Dengar bareng &amp; cetak momen
+              </p>
+            </div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setIsWeeklyAuraOpen(true)}
+          className="group relative overflow-hidden rounded-2xl bg-white/[0.06] hover:bg-white/[0.10] backdrop-blur-xl border border-white/[0.10] p-3.5 sm:p-4 text-left transition-all duration-150 active:scale-[0.98]"
+        >
+          <div className="flex items-start gap-2.5 sm:gap-3">
+            <span className="w-10 h-10 rounded-xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center shrink-0">
+              <AppleEmoji unified="2728" size={20} alt="Weekly Aura" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="font-display text-sm sm:text-[15px] font-bold text-white truncate">
+                Weekly Aura
+              </p>
+              <p className="mt-0.5 text-xs text-white/60 leading-snug line-clamp-2">
+                Raport musik minggumu
+              </p>
+            </div>
+          </div>
+        </button>
+      </section>
+
+      {/* Vibe Filter Bar for iTunes Charts */}
+      <section aria-label="Vibe Filter" className="space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-display text-base sm:text-lg font-bold tracking-tight text-white">
+              Vibe Filter
+            </h2>
+            <p className="text-xs text-white/55">
+              {vibeFilter
+                ? `Tangga lagu diurutkan untuk suasana ${
+                    VIBE_PRESETS.find((p) => p.id === vibeFilter)?.label
+                  }`
+                : 'Prioritaskan tangga lagu iTunes sesuai suasana hatimu'}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {VIBE_PRESETS.map((preset) => {
+              const selected = vibeFilter === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  aria-pressed={selected}
+                  title={preset.description}
+                  onClick={() =>
+                    setVibeFilter((prev) => (prev === preset.id ? null : preset.id))
+                  }
+                  style={
+                    selected && isDynamicThemeSync
+                      ? {
+                          boxShadow: `0 0 18px rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.35)`,
+                        }
+                      : undefined
+                  }
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold transition-all active:scale-[0.97] whitespace-nowrap ${
+                    selected
+                      ? 'bg-white text-[#0B0B0D] shadow-md'
+                      : 'bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.09] text-white/85 hover:text-white'
+                  }`}
+                >
+                  <AppleEmoji unified={preset.emojiUnified} size={14} />
+                  <span>{preset.label}</span>
+                </button>
+              );
+            })}
+
+            {vibeFilter && (
+              <button
+                type="button"
+                onClick={() => setVibeFilter(null)}
+                aria-label="Reset Vibe Filter"
+                className="inline-flex items-center gap-1 px-2.5 py-2 rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.08] text-xs font-medium text-white/70 hover:text-white transition-colors"
+              >
+                <X className="w-3.5 h-3.5" strokeWidth={2} />
+                <span>Reset</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* Row 2: Top Hits Indonesia (Borderless Square Carousel) */}
       <HorizontalTrackShelf
         title="Top Hits Indonesia"
-        tracks={indonesiaTrending}
+        tracks={sortedIndonesiaCharts}
         isLoading={isTrendingLoading}
       />
 
       {/* Row 3: Global Top 50 (Borderless Square Carousel) */}
       <HorizontalTrackShelf
         title="Global Top 50"
-        tracks={featuredTracks}
+        tracks={sortedGlobalCharts}
         isLoading={isTrendingLoading}
       />
 
       {/* Row 4: Viral & Trending (Borderless Square Carousel) */}
       <HorizontalTrackShelf
         title="Viral &amp; Trending"
-        tracks={viralTracks}
+        tracks={sortedViralCharts}
         isLoading={isTrendingLoading}
       />
 
       {/* Row 5: Indie & R&B (Borderless Square Carousel) */}
       <HorizontalTrackShelf
         title="Indie &amp; R&amp;B"
-        tracks={indieRnbTracks}
+        tracks={sortedIndieCharts}
         isLoading={isTrendingLoading}
       />
 
@@ -399,7 +579,7 @@ export const HomeView: React.FC = () => {
                     className="w-full h-full aspect-square object-cover group-hover:scale-[1.03] transition-transform duration-300"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                  <span className="absolute right-2.5 bottom-2.5 w-10 h-10 rounded-full bg-white text-[#0B0B0D] flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.5)] opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-200">
+                  <span className="on-artwork absolute right-2.5 bottom-2.5 w-10 h-10 rounded-full bg-white text-[#0B0B0D] flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.5)] opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-200">
                     {isLoading ? (
                       <Loader2 className="w-4 h-4 animate-spin" strokeWidth={2.2} />
                     ) : (

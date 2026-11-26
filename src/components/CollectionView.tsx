@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { Disc3, Heart, ListMusic, Play, Shuffle, Trash2, Upload } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 import { Track } from '../types/music';
-import { fisherYatesShuffle, formatDuration } from '../utils/audioUtils';
+import { formatDuration, smartShuffleTracks } from '../utils/audioUtils';
 import { TrackRow } from './TrackRow';
 
 interface CollectionViewProps {
@@ -20,6 +20,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({ mode }) => {
     deletePlaylist,
     uploadLocalFiles,
     setActiveView,
+    listeningHistory,
   } = usePlayer();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -104,7 +105,9 @@ export const CollectionView: React.FC<CollectionViewProps> = ({ mode }) => {
           <button
             type="button"
             disabled={tracks.length === 0}
-            onClick={() => tracks[0] && playTrack(tracks[0], tracks)}
+            onClick={() =>
+              tracks[0] && playTrack(tracks[0], tracks, { preserveOrder: true })
+            }
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-[#0B0B0D] bg-white hover:bg-white/90 disabled:opacity-40 transition-all shadow-lg whitespace-nowrap"
           >
             <Play className="w-4 h-4 fill-[#0B0B0D]" strokeWidth={2} />
@@ -115,8 +118,8 @@ export const CollectionView: React.FC<CollectionViewProps> = ({ mode }) => {
             type="button"
             disabled={tracks.length === 0}
             onClick={() => {
-              const shuffled = fisherYatesShuffle(tracks);
-              if (shuffled[0]) playTrack(shuffled[0], shuffled);
+              const shuffled = smartShuffleTracks(tracks, listeningHistory);
+              if (shuffled[0]) playTrack(shuffled[0], shuffled, { preserveOrder: true });
             }}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-medium bg-white/10 hover:bg-white/15 border border-white/[0.08] text-white disabled:opacity-40 transition-colors whitespace-nowrap"
           >
@@ -180,6 +183,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({ mode }) => {
               index={idx}
               contextTracks={tracks}
               playlistIdContext={playlist?.id}
+              preserveQueueOrder={true}
             />
           ))}
         </div>

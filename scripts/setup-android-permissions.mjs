@@ -9,9 +9,15 @@ const REQUIRED_PERMISSIONS = [
   'android.permission.FOREGROUND_SERVICE',
   'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
   'android.permission.POST_NOTIFICATIONS',
+  'android.permission.SYSTEM_ALERT_WINDOW',
   'android.permission.BLUETOOTH',
   'android.permission.BLUETOOTH_CONNECT',
 ];
+
+const OVERLAY_SERVICE_DECLARATION = `        <service
+            android:name=".DynamicIslandOverlayService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false" />`;
 
 if (!fs.existsSync(manifestPath)) {
   console.error(
@@ -33,14 +39,11 @@ if (missing.length > 0) {
   if (appOpenIndex !== -1) {
     xml =
       xml.slice(0, appOpenIndex) +
-      `<!-- Nocty Background Audio, Lockscreen Controls & Bluetooth Headset Permissions -->\n` +
+      `<!-- Nocty Background Audio, Dynamic Island Overlay & Lockscreen Controls Permissions -->\n` +
       `${permissionLines}\n\n    ` +
       xml.slice(appOpenIndex);
   } else {
-    xml = xml.replace(
-      '</manifest>',
-      `\n${permissionLines}\n</manifest>`
-    );
+    xml = xml.replace('</manifest>', `\n${permissionLines}\n</manifest>`);
   }
 }
 
@@ -48,9 +51,21 @@ if (!xml.includes('android:usesCleartextTraffic')) {
   xml = xml.replace('<application', '<application\n        android:usesCleartextTraffic="true"');
 }
 
+if (!xml.includes('.DynamicIslandOverlayService')) {
+  const appCloseIndex = xml.lastIndexOf('</application>');
+  if (appCloseIndex !== -1) {
+    xml =
+      xml.slice(0, appCloseIndex) +
+      `\n        <!-- Nocty Native Floating Dynamic Island Overlay & Media Foreground Service -->\n` +
+      `${OVERLAY_SERVICE_DECLARATION}\n    ` +
+      xml.slice(appCloseIndex);
+  }
+}
+
 fs.writeFileSync(manifestPath, xml, 'utf8');
 
-console.log('[Nocty Android Setup] Permission berhasil diverifikasi di AndroidManifest.xml:');
+console.log('[Nocty Android Setup] Permission & Service berhasil diverifikasi di AndroidManifest.xml:');
 for (const perm of REQUIRED_PERMISSIONS) {
   console.log(`  ✓ ${perm}`);
 }
+console.log('  ✓ Service: .DynamicIslandOverlayService (foregroundServiceType="mediaPlayback")');

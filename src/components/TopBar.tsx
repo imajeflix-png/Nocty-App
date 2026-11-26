@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { AudioWaveform, Home, Search, Upload, X } from 'lucide-react';
+import { AudioWaveform, Home, Monitor, Moon, Palette, Search, Sun, Upload, X } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 import { AppleEmoji } from './AppleEmoji';
 
@@ -13,6 +13,11 @@ export const TopBar: React.FC = () => {
     selectedPlaylistId,
     setIsWeeklyAuraOpen,
     setIsTwinModalOpen,
+    themeMode,
+    cycleThemeMode,
+    isDynamicThemeSync,
+    toggleDynamicThemeSync,
+    ambientPalette,
   } = usePlayer();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -34,8 +39,15 @@ export const TopBar: React.FC = () => {
     }
   };
 
+  const themeLabel =
+    themeMode === 'system'
+      ? 'Tema: Otomatis Sistem OS'
+      : themeMode === 'light'
+        ? 'Tema: Mode Terang'
+        : 'Tema: Mode Gelap';
+
   return (
-    <header className="h-16 shrink-0 px-3 sm:px-4 flex items-center justify-between gap-3 bg-transparent select-none">
+    <header className="h-16 sm:h-[88px] sm:pt-8 shrink-0 px-3 sm:px-4 flex items-center justify-between gap-3 bg-transparent select-none">
       {/* Left: Clean Apple-Style Wordmark */}
       <div className="flex items-center lg:w-[248px] shrink-0">
         <button
@@ -97,26 +109,76 @@ export const TopBar: React.FC = () => {
         </div>
       </div>
 
-      {/* Right: Nocty Twin, Weekly Aura & Upload MP3 */}
+      {/* Right: Desktop Social Quick Triggers + Theme Toggle & Upload MP3 (Mobile shows only + MP3) */}
       <div className="flex items-center justify-end gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={toggleDynamicThemeSync}
+          aria-pressed={isDynamicThemeSync}
+          aria-label={
+            isDynamicThemeSync
+              ? 'Dynamic Theme Sync: Aktif (sinkron warna album)'
+              : 'Dynamic Theme Sync: Nonaktif'
+          }
+          title={
+            isDynamicThemeSync
+              ? 'Dynamic Theme Sync: Aktif — warna UI mengikuti cover album'
+              : 'Dynamic Theme Sync: Nonaktif — klik untuk aktifkan'
+          }
+          className="hidden md:inline-flex relative w-9 h-9 rounded-full items-center justify-center text-white/80 hover:text-white bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] active:scale-[0.98] transition-all shrink-0"
+          style={
+            isDynamicThemeSync
+              ? {
+                  borderColor: `rgba(${ambientPalette.primary.r}, ${ambientPalette.primary.g}, ${ambientPalette.primary.b}, 0.5)`,
+                  boxShadow: `0 0 14px rgba(${ambientPalette.primary.r}, ${ambientPalette.primary.g}, ${ambientPalette.primary.b}, 0.28)`,
+                }
+              : undefined
+          }
+        >
+          <Palette className="w-4 h-4" strokeWidth={1.85} />
+          {isDynamicThemeSync && (
+            <span
+              aria-hidden="true"
+              className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full ring-1 ring-black/40"
+              style={{ backgroundColor: ambientPalette.primary.hex }}
+            />
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={cycleThemeMode}
+          aria-label={themeLabel}
+          title={themeLabel}
+          className="hidden md:inline-flex w-9 h-9 rounded-full items-center justify-center text-white/80 hover:text-white bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] active:scale-[0.98] transition-all shrink-0"
+        >
+          {themeMode === 'system' ? (
+            <Monitor className="w-4 h-4" strokeWidth={1.85} />
+          ) : themeMode === 'light' ? (
+            <Sun className="w-4 h-4" strokeWidth={1.85} />
+          ) : (
+            <Moon className="w-4 h-4" strokeWidth={1.85} />
+          )}
+        </button>
+
         <button
           type="button"
           onClick={() => setIsTwinModalOpen(true)}
           title="Nocty Twin — Dengarkan bersama & Tap Pulse"
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium text-white bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] active:scale-[0.98] transition-all whitespace-nowrap shrink-0"
+          className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium text-white bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] active:scale-[0.98] transition-all whitespace-nowrap shrink-0"
         >
           <AppleEmoji unified="1f3a7" size={14} alt="Nocty Twin" />
-          <span className="hidden md:inline">Twin</span>
+          <span>Twin</span>
         </button>
 
         <button
           type="button"
           onClick={() => setIsWeeklyAuraOpen(true)}
           title="Nocty Weekly Aura — Raport Musik Mingguan"
-          className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-2 rounded-full text-xs font-medium text-white bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] active:scale-[0.98] transition-all whitespace-nowrap shrink-0"
+          className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium text-white bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] active:scale-[0.98] transition-all whitespace-nowrap shrink-0"
         >
           <AppleEmoji unified="2728" size={14} alt="Weekly Aura" />
-          <span className="hidden sm:inline">Weekly Aura</span>
+          <span>Weekly Aura</span>
         </button>
 
         <input
@@ -130,11 +192,11 @@ export const TopBar: React.FC = () => {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full text-xs font-medium text-white bg-white/10 hover:bg-white/15 border border-white/[0.08] active:scale-[0.98] transition-all whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full text-xs font-medium text-white bg-white/10 hover:bg-white/15 border border-white/[0.08] active:scale-[0.98] transition-all whitespace-nowrap shrink-0"
         >
           <Upload className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.9} />
           <span className="hidden sm:inline">+ Upload MP3</span>
-          <span className="sm:hidden">MP3</span>
+          <span className="sm:hidden">+ MP3</span>
         </button>
       </div>
     </header>

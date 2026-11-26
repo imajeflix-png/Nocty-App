@@ -49,6 +49,7 @@ export const FloatingPlayerDock: React.FC = () => {
     loopMode,
     rightPanelTab,
     ambientPalette,
+    isDynamicThemeSync,
     sleepTimerRemaining,
     sleepTimerMode,
     setSleepTimerMinutes,
@@ -85,7 +86,8 @@ export const FloatingPlayerDock: React.FC = () => {
 
   const progressRatio = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
   const liked = currentTrack ? isLiked(currentTrack.id) : false;
-  const { primary, secondary } = ambientPalette;
+  const { primary, secondary, gradientIntensity } = ambientPalette;
+  const accentStyleColor = isDynamicThemeSync ? primary.hex : undefined;
   const isSleepActive = sleepTimerMode !== 'off';
 
   const computeSeekFromPointer = (clientX: number) => {
@@ -102,8 +104,9 @@ export const FloatingPlayerDock: React.FC = () => {
         <div className="relative overflow-hidden rounded-2xl bg-white/[0.08] backdrop-blur-2xl border border-white/[0.10] shadow-[0_12px_36px_rgba(0,0,0,0.65)]">
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 blur-2xl opacity-25 transition-all duration-1000"
+            className="pointer-events-none absolute inset-0 blur-2xl transition-all duration-1000"
             style={{
+              opacity: Math.min(0.5, gradientIntensity * 0.85),
               background: `linear-gradient(110deg, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.8), rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.7))`,
             }}
           />
@@ -125,7 +128,9 @@ export const FloatingPlayerDock: React.FC = () => {
                   <p className="text-xs font-semibold text-white truncate">
                     {currentTrack ? currentTrack.title : 'Nocty Siap'}
                   </p>
-                  {currentTrack && isPlaying && <EqualizerBars active={true} className="h-2.5" />}
+                  {currentTrack && isPlaying && (
+                    <EqualizerBars active={true} className="h-2.5" barColor={accentStyleColor} />
+                  )}
                 </div>
                 <p className="text-[11px] text-white/60 truncate">
                   {currentTrack ? currentTrack.artist : 'Pilih lagu untuk mulai'}
@@ -189,8 +194,11 @@ export const FloatingPlayerDock: React.FC = () => {
           {/* Slim bottom edge progress line */}
           <div className="relative z-10 h-[2px] w-full bg-white/10">
             <div
-              className="h-full bg-white transition-[width] duration-150"
-              style={{ width: `${progressRatio * 100}%` }}
+              className="h-full bg-white transition-[width,background-color] duration-300"
+              style={{
+                width: `${progressRatio * 100}%`,
+                backgroundColor: accentStyleColor,
+              }}
             />
           </div>
         </div>
@@ -202,8 +210,9 @@ export const FloatingPlayerDock: React.FC = () => {
           {/* Soft Dual-Color Ambient Aura behind Floating Glass Dock */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 blur-3xl opacity-25 transition-all duration-1000"
+            className="pointer-events-none absolute inset-0 blur-3xl transition-all duration-1000"
             style={{
+              opacity: Math.min(0.52, gradientIntensity * 0.85),
               background: `
                 radial-gradient(ellipse 40% 110% at 15% 50%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.85) 0%, transparent 75%),
                 radial-gradient(ellipse 40% 110% at 85% 50%, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.75) 0%, transparent 75%)
@@ -231,7 +240,9 @@ export const FloatingPlayerDock: React.FC = () => {
                   <p className="text-sm font-semibold text-white truncate">
                     {currentTrack ? currentTrack.title : 'Nocty Siap'}
                   </p>
-                  {currentTrack && isPlaying && <EqualizerBars active={true} className="h-3" />}
+                  {currentTrack && isPlaying && (
+                    <EqualizerBars active={true} className="h-3" barColor={accentStyleColor} />
+                  )}
                 </div>
                 <p className="text-xs text-white/55 truncate mt-0.5">
                   {currentTrack
@@ -261,8 +272,8 @@ export const FloatingPlayerDock: React.FC = () => {
               <button
                 type="button"
                 onClick={toggleShuffle}
-                aria-label="True Shuffle (Fisher-Yates)"
-                title="True Shuffle"
+                aria-label="Smart Shuffle"
+                title="Smart Shuffle (hindari artis sama & sesuai riwayat)"
                 className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
                   isShuffled
                     ? 'bg-white/15 text-white'
@@ -358,13 +369,19 @@ export const FloatingPlayerDock: React.FC = () => {
                     />
                   )}
                   <div
-                    className="absolute inset-y-0 left-0 bg-white rounded-full transition-[width] duration-75"
-                    style={{ width: `${progressRatio * 100}%` }}
+                    className="absolute inset-y-0 left-0 bg-white rounded-full transition-[width,background-color] duration-150"
+                    style={{
+                      width: `${progressRatio * 100}%`,
+                      backgroundColor: accentStyleColor,
+                    }}
                   />
                 </div>
                 <div
                   className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-white shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-                  style={{ left: `${progressRatio * 100}%` }}
+                  style={{
+                    left: `${progressRatio * 100}%`,
+                    backgroundColor: accentStyleColor,
+                  }}
                 />
               </div>
 
@@ -460,6 +477,7 @@ export const FloatingPlayerDock: React.FC = () => {
                 value={isMuted ? 0 : volume}
                 onChange={(e) => setVolume(parseFloat(e.target.value))}
                 aria-label="Kontrol volume"
+                style={accentStyleColor ? { accentColor: accentStyleColor } : undefined}
                 className="w-20 xl:w-24 accent-white cursor-pointer h-1 bg-white/20 rounded-lg"
               />
             </div>
