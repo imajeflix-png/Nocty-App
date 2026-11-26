@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { Compass, Disc3, Heart, Home, ListMusic, Plus, Upload } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
+import { AppleEmoji } from './AppleEmoji';
 import { CoverArt } from './CoverArt';
 
 export const Sidebar: React.FC = () => {
@@ -189,7 +190,8 @@ export const Sidebar: React.FC = () => {
             onClick={promptInstallApp}
             className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-semibold text-[#0B0B0D] bg-white hover:bg-white/90 transition-colors whitespace-nowrap shadow-md"
           >
-            <span>✨ Install App (PWA)</span>
+            <AppleEmoji unified="2728" size={14} />
+            <span>Install App (PWA)</span>
           </button>
         )}
         <input

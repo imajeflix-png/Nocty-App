@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Mic2 } from 'lucide-react';
+import { Loader2, Mic2, Share2, Sparkles } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 
 interface SyncedLyricsListProps {
@@ -7,7 +7,15 @@ interface SyncedLyricsListProps {
 }
 
 export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'panel' }) => {
-  const { currentTrack, currentTime, seekTo, lyricOffset, setLyricOffset } = usePlayer();
+  const {
+    currentTrack,
+    currentTime,
+    seekTo,
+    lyricOffset,
+    setLyricOffset,
+    setIsWhisperComposerOpen,
+    setIsLyricCardOpen,
+  } = usePlayer();
   const containerRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [userScrolling, setUserScrolling] = useState(false);
@@ -81,11 +89,29 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
 
   return (
     <div className="h-full flex flex-col">
-      {/* Lyric Offset Control Bar */}
-      {syncedLines.length > 0 && (
-        <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06] bg-white/[0.02] shrink-0 text-xs text-white/60">
-          <span>Geser Waktu Lirik</span>
-          <div className="flex items-center gap-1">
+      {/* Social Actions & Lyric Offset Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-white/[0.06] bg-white/[0.02] shrink-0 text-xs text-white/60">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setIsWhisperComposerOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-[#0B0B0D] hover:bg-white/90 text-xs font-semibold transition-colors whitespace-nowrap"
+          >
+            <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />
+            <span>Kirim Whisper</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsLyricCardOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/16 border border-white/[0.10] text-xs font-medium text-white transition-colors whitespace-nowrap"
+          >
+            <Share2 className="w-3.5 h-3.5" strokeWidth={1.9} />
+            <span>Share Kartu Lirik</span>
+          </button>
+        </div>
+
+        {syncedLines.length > 0 && (
+          <div className="flex items-center gap-1 ml-auto">
             <button
               type="button"
               onClick={() => adjustOffset(-0.5)}
@@ -108,8 +134,8 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
               +0.5s
             </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {syncedLines.length > 0 ? (
         <div

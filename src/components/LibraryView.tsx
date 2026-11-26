@@ -1,6 +1,8 @@
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { ChevronRight, Heart, ListMusic, Plus, Upload } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
+import { analyzeWeeklyAura } from '../utils/weeklyAuraUtils';
+import { AppleEmoji } from './AppleEmoji';
 import { TrackRow } from './TrackRow';
 
 export const LibraryView: React.FC = () => {
@@ -8,11 +10,15 @@ export const LibraryView: React.FC = () => {
     likedTracks,
     playlists,
     localTracks,
+    listeningHistory,
     setActiveView,
     openPlaylist,
     setIsCreatePlaylistOpen,
+    setIsWeeklyAuraOpen,
     uploadLocalFiles,
   } = usePlayer();
+
+  const weeklyReport = useMemo(() => analyzeWeeklyAura(listeningHistory), [listeningHistory]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -63,6 +69,39 @@ export const LibraryView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Nocty Weekly Aura Interactive Banner */}
+      <button
+        type="button"
+        onClick={() => setIsWeeklyAuraOpen(true)}
+        className="group relative w-full overflow-hidden rounded-2xl bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.10] p-5 text-left transition-all shadow-lg"
+      >
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-12 -top-12 w-56 h-56 rounded-full blur-3xl opacity-35 transition-opacity group-hover:opacity-50"
+          style={{
+            background: `radial-gradient(circle, rgba(${weeklyReport.auraPalette.primary.r}, ${weeklyReport.auraPalette.primary.g}, ${weeklyReport.auraPalette.primary.b}, 0.9), transparent 70%)`,
+          }}
+        />
+        <div className="relative z-10 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5 min-w-0">
+            <span className="w-12 h-12 rounded-2xl bg-white/12 border border-white/[0.14] flex items-center justify-center shrink-0">
+              <AppleEmoji unified="2728" size={22} />
+            </span>
+            <div className="min-w-0">
+              <p className="font-display text-sm sm:text-base font-bold text-white flex items-center gap-1.5 truncate">
+                <span>Nocty Weekly Aura — Cek Raport Musikmu</span>
+              </p>
+              <p className="text-xs text-white/60 truncate mt-0.5">
+                {weeklyReport.hasEnoughData
+                  ? `${weeklyReport.auraTitle} · ${weeklyReport.formattedTotalTime} minggu ini`
+                  : 'Analisis vibe, jam dengar, & kartu IG Story 9:16'}
+              </p>
+            </div>
+          </div>
+          <ChevronRight className="w-5 h-5 text-white/60 group-hover:text-white group-hover:translate-x-0.5 transition-all shrink-0" />
+        </div>
+      </button>
 
       {/* Quick Library Access Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -11,6 +11,11 @@ import { FloatingPlayerDock } from './components/FloatingPlayerDock';
 import { ZenFocusMode } from './components/ZenFocusMode';
 import { CreatePlaylistModal } from './components/CreatePlaylistModal';
 import { MobileNavBar } from './components/MobileNavBar';
+import { LyricWhisperModal } from './components/LyricWhisperModal';
+import { LyricCardModal } from './components/LyricCardModal';
+import { WhisperReceiverModal } from './components/WhisperReceiverModal';
+import { WeeklyAuraModal } from './components/WeeklyAuraModal';
+import { NoctyTwinModal } from './components/NoctyTwinModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 const NoctyShell: React.FC = () => {
@@ -86,6 +91,13 @@ const NoctyShell: React.FC = () => {
 
       {/* Create Playlist Modal */}
       <CreatePlaylistModal />
+
+      {/* Lyric Whisper Composer, 9:16 Shareable Card, ?whisper= Receiver & Weekly Aura */}
+      <LyricWhisperModal />
+      <LyricCardModal />
+      <WhisperReceiverModal />
+      <WeeklyAuraModal />
+      <NoctyTwinModal />
 
       {/* Non-Blocking Frosted Glass Toast Notifications */}
       {toasts.length > 0 && (

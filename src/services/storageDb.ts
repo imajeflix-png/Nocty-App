@@ -12,7 +12,17 @@ const STORAGE_KEYS = {
   PREFS: 'nocty_player_prefs_v1',
   AMBIENT_VIDEO: 'nocty_ambient_video',
   AUTOPLAY: 'nocty_autoplay',
+  LISTENING_HISTORY: 'nocty_listening_history',
 };
+
+export interface ListeningHistoryEntry {
+  trackId: string;
+  title: string;
+  artist: string;
+  artwork: string;
+  durationListened: number;
+  timestamp: number;
+}
 
 interface StoredLocalTrackRecord {
   id: string;
@@ -317,4 +327,41 @@ export function saveAutoplayPref(enabled: boolean): void {
     // Ignore
   }
 }
+
+const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+
+export function loadListeningHistory(): ListeningHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.LISTENING_HISTORY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const cutoff = Date.now() - FOURTEEN_DAYS_MS;
+    return parsed
+      .filter(
+        (item): item is ListeningHistoryEntry =>
+          Boolean(item) &&
+          typeof item.trackId === 'string' &&
+          typeof item.title === 'string' &&
+          typeof item.artist === 'string' &&
+          typeof item.durationListened === 'number' &&
+          typeof item.timestamp === 'number' &&
+          item.timestamp >= cutoff
+      )
+      .slice(-500);
+  } catch {
+    return [];
+  }
+}
+
+export function saveListeningHistory(entries: ListeningHistoryEntry[]): void {
+  try {
+    const cutoff = Date.now() - FOURTEEN_DAYS_MS;
+    const trimmed = entries.filter((e) => e.timestamp >= cutoff).slice(-500);
+    localStorage.setItem(STORAGE_KEYS.LISTENING_HISTORY, JSON.stringify(trimmed));
+  } catch {
+    // Ignore quota errors
+  }
+}
+
 

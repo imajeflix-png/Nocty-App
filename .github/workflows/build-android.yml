@@ -22,6 +22,12 @@ jobs:
         run: npm install @capacitor/core @capacitor/cli @capacitor/android
       - name: Add Android Platform
         run: npx cap add android
+      - name: Inject Android Media & Background Permissions
+        run: |
+          node scripts/setup-android-permissions.mjs
+          grep -n "uses-permission" android/app/src/main/AndroidManifest.xml
+      - name: Sync Capacitor Android Assets
+        run: npx cap sync android
       - name: Build Android APK Debug
         run: cd android && ./gradlew assembleDebug
       - name: Upload APK Artifact

@@ -18,12 +18,14 @@ import {
 } from '../types/music';
 import { DEFAULT_COVER_URL, EMERGENCY_FALLBACK_TRACKS } from '../data/moods';
 import {
+  ListeningHistoryEntry,
   deleteLocalTrackFromDb,
   extractLocalFileDuration,
   getAllLocalTracksFromDb,
   loadAmbientVideoPref,
   loadAutoplayPref,
   loadLikedIdsFromStorage,
+  loadListeningHistory,
   loadPlayerPrefs,
   loadPlaylistsFromStorage,
   loadSavedTracksFromStorage,
@@ -31,6 +33,7 @@ import {
   saveAmbientVideoPref,
   saveAutoplayPref,
   saveLikedIdsToStorage,
+  saveListeningHistory,
   saveLocalTrackToDb,
   savePlayerPrefs,
   savePlaylistsToStorage,
@@ -44,9 +47,10 @@ import {
 } from '../services/musicApi';
 import { fetchSyncedLyrics } from '../services/lrclibApi';
 import { extractCoverAmbientPalette, fisherYatesShuffle } from '../utils/audioUtils';
+import { generateSimulatedWeeklyHistory } from '../utils/weeklyAuraUtils';
 
 interface YTPlayerInstance {
-  loadVideoById: (videoId: string) => void;
+  loadVideoById: (arg: string | { videoId: string; startSeconds?: number }) => void;
   playVideo: () => void;
   pauseVideo: () => void;
   stopVideo: () => void;
@@ -157,6 +161,7 @@ interface PlayerContextValue {
 
   // Player Actions
   playTrack: (track: Track, contextTracks?: Track[]) => void;
+  playTrackAtTime: (track: Track, startSeconds?: number) => void;
   togglePlayPause: () => void;
   playNext: () => void;
   playPrev: () => void;
@@ -199,6 +204,18 @@ interface PlayerContextValue {
   // PWA Install Prompt
   isInstallable: boolean;
   promptInstallApp: () => Promise<void>;
+
+  // Social Modals (Lyric Whisper, 9:16 Share Card & Weekly Aura)
+  isWhisperComposerOpen: boolean;
+  setIsWhisperComposerOpen: (open: boolean) => void;
+  isLyricCardOpen: boolean;
+  setIsLyricCardOpen: (open: boolean) => void;
+  isWeeklyAuraOpen: boolean;
+  setIsWeeklyAuraOpen: (open: boolean) => void;
+  isTwinModalOpen: boolean;
+  setIsTwinModalOpen: (open: boolean) => void;
+  listeningHistory: ListeningHistoryEntry[];
+  simulateWeeklyAuraData: () => void;
 
   // Notifications
   toasts: ToastMessage[];
@@ -311,6 +328,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallable, setIsInstallable] = useState<boolean>(false);
   const [activeYtDeck, setActiveYtDeck] = useState<0 | 1>(0);
+  const [isWhisperComposerOpen, setIsWhisperComposerOpen] = useState(false);
+  const [isLyricCardOpen, setIsLyricCardOpen] = useState(false);
+  const [isWeeklyAuraOpen, setIsWeeklyAuraOpen] = useState(false);
+  const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
+  const [listeningHistory, setListeningHistory] = useState<ListeningHistoryEntry[]>(() =>
+    loadListeningHistory()
+  );
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   // Dual Audio Engine Pools (2 YouTube IFrame Decks + 2 HTML5 <audio> Elements for true overlapping cross-fade)
@@ -323,13 +347,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const ytPlayersRef = useRef<[YTPlayerInstance | null, YTPlayerInstance | null]>([null, null]);
   const ytReadyRef = useRef<[boolean, boolean]>([false, false]);
   const activeYtDeckRef = useRef<0 | 1>(0);
-  const pendingYtVideoIdsRef = useRef<[string | null, string | null]>([null, null]);
+  const pendingYtVideoIdsRef = useRef<[(string | { videoId: string; startSeconds?: number }) | null, (string | { videoId: string; startSeconds?: number }) | null]>([null, null]);
   const ytFadeTimersRef = useRef<[number | null, number | null]>([null, null]);
   const ytFadeGainRef = useRef<[number, number]>([1, 1]);
   const ytFadingInPendingRef = useRef<[number | null, number | null]>([null, null]);
 
   const activeEngineRef = useRef<PlaybackEngine>(null);
   const lastManualSeekAtRef = useRef<number>(0);
+  const pendingInitialSeekRef = useRef<{ seq: number; seconds: number } | null>(null);
   const sleepTimerEndAtRef = useRef<number | null>(null);
   const sleepTimerModeRef = useRef<'off' | 'countdown' | 'end_of_track'>('off');
   sleepTimerModeRef.current = sleepTimerMode;
@@ -361,6 +386,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   crossfadeDurationRef.current = crossfadeDuration;
   const isAutoplayEnabledRef = useRef(isAutoplayEnabled);
   isAutoplayEnabledRef.current = isAutoplayEnabled;
+
+  const listeningSessionRef = useRef<{
+    trackId: string;
+    title: string;
+    artist: string;
+    artwork: string;
+    accumulatedSeconds: number;
+    startedAt: number;
+    recordedTimestamp: number | null;
+  } | null>(null);
 
   const pushToast = useCallback((text: string, tone: ToastMessage['tone'] = 'info') => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
@@ -612,8 +647,15 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     navigator.mediaSession.setActionHandler('play', () => togglePlayPauseRef.current());
     navigator.mediaSession.setActionHandler('pause', () => togglePlayPauseRef.current());
+    navigator.mediaSession.setActionHandler('stop', () => togglePlayPauseRef.current());
     navigator.mediaSession.setActionHandler('previoustrack', () => playPrevRef.current());
     navigator.mediaSession.setActionHandler('nexttrack', () => playNextRef.current());
+    navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+      seekToRef.current(Math.max(0, currentTimeRef.current - (details.seekOffset || 10)));
+    });
+    navigator.mediaSession.setActionHandler('seekforward', (details) => {
+      seekToRef.current(currentTimeRef.current + (details.seekOffset || 10));
+    });
     navigator.mediaSession.setActionHandler('seekto', (details) => {
       if (details.seekTime !== undefined) seekToRef.current(details.seekTime);
     });
@@ -622,6 +664,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
     try {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : currentTrack ? 'paused' : 'none';
       if ('setPositionState' in navigator.mediaSession && duration > 0 && Number.isFinite(currentTime)) {
         navigator.mediaSession.setPositionState({
           duration: Math.max(0, duration),
@@ -632,7 +675,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } catch {
       // Ignore
     }
-  }, [currentTime, duration]);
+  }, [currentTime, duration, isPlaying, currentTrack]);
 
   useEffect(() => {
     if (!currentTrack) return;
@@ -697,6 +740,90 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     return () => controller.abort();
   }, [currentTrack?.id]);
+
+  // Silent Listening History Tracker (>20s per play stored to nocty_listening_history)
+  const flushListeningSession = useCallback(() => {
+    const session = listeningSessionRef.current;
+    if (!session || session.accumulatedSeconds < 20) return;
+
+    const entryTimestamp = session.recordedTimestamp ?? session.startedAt;
+    session.recordedTimestamp = entryTimestamp;
+
+    const updatedEntry: ListeningHistoryEntry = {
+      trackId: session.trackId,
+      title: session.title,
+      artist: session.artist,
+      artwork: session.artwork,
+      durationListened: Math.round(session.accumulatedSeconds),
+      timestamp: entryTimestamp,
+    };
+
+    setListeningHistory((prev) => {
+      const idx = prev.findIndex(
+        (item) => item.trackId === updatedEntry.trackId && item.timestamp === entryTimestamp
+      );
+      const next =
+        idx !== -1
+          ? prev.map((item, i) => (i === idx ? updatedEntry : item))
+          : [...prev, updatedEntry];
+      saveListeningHistory(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    flushListeningSession();
+    if (!currentTrack) {
+      listeningSessionRef.current = null;
+      return;
+    }
+    listeningSessionRef.current = {
+      trackId: currentTrack.id,
+      title: currentTrack.title,
+      artist: currentTrack.artist,
+      artwork: currentTrack.coverUrl,
+      accumulatedSeconds: 0,
+      startedAt: Date.now(),
+      recordedTimestamp: null,
+    };
+  }, [currentTrack?.id, flushListeningSession]);
+
+  useEffect(() => {
+    if (!isPlaying || !currentTrack) {
+      flushListeningSession();
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      const session = listeningSessionRef.current;
+      if (!session || session.trackId !== currentTrack.id) return;
+      session.accumulatedSeconds += 1;
+
+      if (
+        session.accumulatedSeconds === 20 ||
+        (session.accumulatedSeconds > 20 && session.accumulatedSeconds % 10 === 0)
+      ) {
+        flushListeningSession();
+      }
+    }, 1000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [isPlaying, currentTrack?.id, flushListeningSession]);
+
+  const simulateWeeklyAuraData = useCallback(() => {
+    const seedPool = [
+      ...indonesiaTrending,
+      ...featuredTracks,
+      ...viralTracks,
+      ...indieRnbTracks,
+    ];
+    const simulated = generateSimulatedWeeklyHistory(seedPool);
+    setListeningHistory(simulated);
+    saveListeningHistory(simulated);
+    pushToast('Data simulasi Weekly Aura minggu ini dibuat', 'success');
+  }, [featuredTracks, indieRnbTracks, indonesiaTrending, pushToast, viralTracks]);
 
   const clearYtFade = useCallback((deckIdx: 0 | 1) => {
     const timer = ytFadeTimersRef.current[deckIdx];
@@ -868,18 +995,26 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const advanceQueueOnEndOrSkipRef = useRef<() => void>(() => {});
   const startPlaybackRef = useRef<
-    (track: Track, isAutoRecovery?: boolean, transitionMode?: 'direct' | 'skip' | 'auto') => Promise<void>
+    (
+      track: Track,
+      isAutoRecovery?: boolean,
+      transitionMode?: 'direct' | 'skip' | 'auto',
+      startSeconds?: number
+    ) => Promise<void>
   >(async () => {});
 
   const startPlaybackForTrack = useCallback(
     async (
       track: Track,
       isAutoRecovery = false,
-      transitionMode: 'direct' | 'skip' | 'auto' = 'direct'
+      transitionMode: 'direct' | 'skip' | 'auto' = 'direct',
+      startSeconds = 0
     ) => {
       const reqSeq = ++playRequestSeqRef.current;
       crossfadeTriggeredSeqRef.current = -1;
       fallbackAttemptIndexRef.current = 0;
+      const safeStart = startSeconds > 0 && Number.isFinite(startSeconds) ? startSeconds : 0;
+      pendingInitialSeekRef.current = safeStart > 0 ? { seq: reqSeq, seconds: safeStart } : null;
       if (!isAutoRecovery) {
         consecutiveErrorSkipsRef.current = 0;
       }
@@ -902,7 +1037,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           : Math.min(cfSeconds * 1000, 1400);
 
       setCurrentTrackId(track.id);
-      setCurrentTime(0);
+      setCurrentTime(safeStart);
       setDuration(track.duration || 0);
       setIsBuffering(true);
 
@@ -940,7 +1075,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           applyHtml5SlotGain(nextSlot, fadeInMs > 0 ? 0.03 : 1);
           incomingAudio.src = track.audioUrl;
           incomingAudio.load();
+          if (safeStart > 0) {
+            incomingAudio.currentTime = safeStart;
+          }
           await incomingAudio.play();
+          if (safeStart > 0 && Math.abs(incomingAudio.currentTime - safeStart) > 1.2) {
+            incomingAudio.currentTime = safeStart;
+          }
+          pendingInitialSeekRef.current = null;
           if (playRequestSeqRef.current === reqSeq) {
             setIsPlaying(true);
             setIsBuffering(false);
@@ -1001,6 +1143,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         clearYtFade(nextDeck);
 
+        const ytLoadArg = safeStart > 0 ? { videoId, startSeconds: safeStart } : videoId;
         if (ytReadyRef.current[nextDeck] && ytPlayersRef.current[nextDeck]) {
           pendingYtVideoIdsRef.current[nextDeck] = null;
           if (fadeInMs > 0) {
@@ -1010,9 +1153,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             applyYtDeckGain(nextDeck, 1);
             ytFadingInPendingRef.current[nextDeck] = null;
           }
-          ytPlayersRef.current[nextDeck]!.loadVideoById(videoId);
+          ytPlayersRef.current[nextDeck]!.loadVideoById(ytLoadArg);
         } else {
-          pendingYtVideoIdsRef.current[nextDeck] = videoId;
+          pendingYtVideoIdsRef.current[nextDeck] = ytLoadArg;
           ytFadingInPendingRef.current[nextDeck] = fadeInMs > 0 ? fadeInMs : null;
           loadYouTubeIframeApi();
         }
@@ -1052,7 +1195,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         applyHtml5SlotGain(nextSlot, fadeInMs > 0 ? 0.03 : 1);
         incomingAudio.src = srcUrl;
         incomingAudio.load();
+        if (safeStart > 0) {
+          incomingAudio.currentTime = safeStart;
+        }
         await incomingAudio.play();
+        if (safeStart > 0 && Math.abs(incomingAudio.currentTime - safeStart) > 1.2) {
+          incomingAudio.currentTime = safeStart;
+        }
+        pendingInitialSeekRef.current = null;
         if (playRequestSeqRef.current === reqSeq) {
           setIsPlaying(true);
           setIsBuffering(false);
@@ -1267,6 +1417,21 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 if (pendingFadeMs && pendingFadeMs > 0) {
                   ytFadingInPendingRef.current[deckIdx] = null;
                   fadeInYtDeck(deckIdx, pendingFadeMs);
+                }
+
+                const pendingSeek = pendingInitialSeekRef.current;
+                if (pendingSeek && pendingSeek.seq === playRequestSeqRef.current) {
+                  pendingInitialSeekRef.current = null;
+                  try {
+                    const curNow = event.target.getCurrentTime?.() || 0;
+                    if (Math.abs(curNow - pendingSeek.seconds) > 1.5) {
+                      lastManualSeekAtRef.current = Date.now();
+                      setCurrentTime(pendingSeek.seconds);
+                      event.target.seekTo(pendingSeek.seconds, true);
+                    }
+                  } catch {
+                    // Ignore
+                  }
                 }
 
                 try {
@@ -1624,6 +1789,55 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       startPlaybackForTrack(track, false, 'skip');
     },
     [currentTrackId, isPlaying, isShuffled, queueIds, registerTracks, startPlaybackForTrack]
+  );
+
+  const playTrackAtTime = useCallback(
+    (track: Track, startSeconds = 0) => {
+      const pool = [
+        track,
+        ...indonesiaTrending,
+        ...featuredTracks,
+        ...viralTracks,
+        ...indieRnbTracks,
+        ...Object.values(trackRegistryRef.current),
+      ];
+      const unique = Array.from(new Map(pool.map((t) => [t.id, t])).values()).slice(0, 35);
+      registerTracks(unique);
+
+      const baseIds = unique.map((t) => t.id);
+      if (!baseIds.includes(track.id)) baseIds.unshift(track.id);
+      setOriginalQueueIds(baseIds);
+      setQueueIds(baseIds);
+
+      if (track.id === currentTrackIdRef.current) {
+        const deckIdx = activeYtDeckRef.current;
+        const ytPlayer = ytPlayersRef.current[deckIdx];
+        if (activeEngineRef.current === 'youtube' && ytReadyRef.current[deckIdx] && ytPlayer) {
+          lastManualSeekAtRef.current = Date.now();
+          setCurrentTime(startSeconds);
+          ytPlayer.seekTo(startSeconds, true);
+          ytPlayer.playVideo();
+          return;
+        }
+        const audio = html5PoolRef.current[activeHtml5SlotRef.current];
+        if (activeEngineRef.current === 'html5' && audio?.src) {
+          audio.currentTime = startSeconds;
+          setCurrentTime(startSeconds);
+          audio.play().catch(() => startPlaybackForTrack(track, false, 'skip', startSeconds));
+          return;
+        }
+      }
+
+      startPlaybackForTrack(track, false, 'skip', startSeconds);
+    },
+    [
+      featuredTracks,
+      indieRnbTracks,
+      indonesiaTrending,
+      registerTracks,
+      startPlaybackForTrack,
+      viralTracks,
+    ]
   );
 
   const togglePlayPause = useCallback(() => {
@@ -2165,6 +2379,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     ambientColor: ambientPalette.primary,
     ambientPalette,
     playTrack,
+    playTrackAtTime,
     togglePlayPause,
     playNext,
     playPrev,
@@ -2195,6 +2410,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setLyricOffset,
     isInstallable,
     promptInstallApp,
+    isWhisperComposerOpen,
+    setIsWhisperComposerOpen,
+    isLyricCardOpen,
+    setIsLyricCardOpen,
+    isWeeklyAuraOpen,
+    setIsWeeklyAuraOpen,
+    isTwinModalOpen,
+    setIsTwinModalOpen,
+    listeningHistory,
+    simulateWeeklyAuraData,
     toasts,
     pushToast,
   };

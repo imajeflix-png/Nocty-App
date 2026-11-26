@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { AudioWaveform, Home, Search, Upload, X } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
+import { AppleEmoji } from './AppleEmoji';
 
 export const TopBar: React.FC = () => {
   const {
@@ -10,6 +11,8 @@ export const TopBar: React.FC = () => {
     setSearchQuery,
     uploadLocalFiles,
     selectedPlaylistId,
+    setIsWeeklyAuraOpen,
+    setIsTwinModalOpen,
   } = usePlayer();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -94,8 +97,28 @@ export const TopBar: React.FC = () => {
         </div>
       </div>
 
-      {/* Right: Secondary Glass Upload MP3 CTA */}
-      <div className="flex items-center justify-end lg:w-[248px] shrink-0">
+      {/* Right: Nocty Twin, Weekly Aura & Upload MP3 */}
+      <div className="flex items-center justify-end gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => setIsTwinModalOpen(true)}
+          title="Nocty Twin — Dengarkan bersama & Tap Pulse"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium text-white bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] active:scale-[0.98] transition-all whitespace-nowrap shrink-0"
+        >
+          <AppleEmoji unified="1f3a7" size={14} alt="Nocty Twin" />
+          <span className="hidden md:inline">Twin</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setIsWeeklyAuraOpen(true)}
+          title="Nocty Weekly Aura — Raport Musik Mingguan"
+          className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-2 rounded-full text-xs font-medium text-white bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] active:scale-[0.98] transition-all whitespace-nowrap shrink-0"
+        >
+          <AppleEmoji unified="2728" size={14} alt="Weekly Aura" />
+          <span className="hidden sm:inline">Weekly Aura</span>
+        </button>
+
         <input
           ref={fileInputRef}
           type="file"
@@ -107,10 +130,11 @@ export const TopBar: React.FC = () => {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium text-white bg-white/10 hover:bg-white/15 border border-white/[0.08] active:scale-[0.98] transition-all whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full text-xs font-medium text-white bg-white/10 hover:bg-white/15 border border-white/[0.08] active:scale-[0.98] transition-all whitespace-nowrap shrink-0"
         >
           <Upload className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.9} />
-          <span>+ Upload MP3</span>
+          <span className="hidden sm:inline">+ Upload MP3</span>
+          <span className="sm:hidden">MP3</span>
         </button>
       </div>
     </header>

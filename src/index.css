@@ -141,12 +141,37 @@
   transform-origin: bottom;
 }
 
+/* Floating Tap Pulse Emoji Animation */
+@keyframes floatPulseUp {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.6);
+  }
+  18% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1.12);
+  }
+  75% {
+    opacity: 0.92;
+    transform: translateY(-145px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-210px) scale(0.85);
+  }
+}
+
+.animate-float-pulse {
+  animation: floatPulseUp 2.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-disc-spin,
   .eq-bar-1,
   .eq-bar-2,
   .eq-bar-3,
-  .eq-bar-4 {
+  .eq-bar-4,
+  .animate-float-pulse {
     animation: none !important;
   }
 }
