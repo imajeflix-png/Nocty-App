@@ -1,0 +1,6 @@
+{
+  "name": "PureBeat",
+  "description": "Pemutar musik web ringan, cepat, dan bebas bloat dengan streaming penuh, unggah MP3 lokal permanen, dan lirik sinkron otomatis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

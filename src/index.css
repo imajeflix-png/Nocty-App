@@ -1,0 +1,124 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg-canvas: #0B0B0F;
+  --bg-surface: #121218;
+  --bg-elevated: #181822;
+  --border-hairline: rgba(255, 255, 255, 0.08);
+  --accent-emerald: #10B981;
+  --accent-lime: #A3E635;
+  --ambient-rgb: 16, 185, 129;
+  --font-display: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-sans: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  html,
+  body {
+    background-color: var(--bg-canvas);
+    color: #f4f4f6;
+    font-family: var(--font-sans);
+    letter-spacing: 0.005em;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono-tabular {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Custom ultra-clean dark scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.45);
+}
+
+/* Neon Emerald-Lime Gradient Utilities */
+.text-neon-gradient {
+  background: linear-gradient(135deg, #10B981 0%, #84CC16 55%, #D9F99D 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.bg-neon-gradient {
+  background: linear-gradient(135deg, #10B981 0%, #84CC16 65%, #A3E635 100%);
+}
+
+/* Slow spinning vinyl / cover disc */
+@keyframes spinSlow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-disc-spin {
+  animation: spinSlow 18s linear infinite;
+}
+
+.disc-paused {
+  animation-play-state: paused;
+}
+
+.disc-running {
+  animation-play-state: running;
+}
+
+/* Minimalist 4-bar equalizer wave */
+@keyframes eqPulse1 {
+  0%, 100% { transform: scaleY(0.28); }
+  50% { transform: scaleY(0.95); }
+}
+
+@keyframes eqPulse2 {
+  0%, 100% { transform: scaleY(0.85); }
+  45% { transform: scaleY(0.32); }
+}
+
+@keyframes eqPulse3 {
+  0%, 100% { transform: scaleY(0.45); }
+  60% { transform: scaleY(1); }
+}
+
+@keyframes eqPulse4 {
+  0%, 100% { transform: scaleY(0.7); }
+  40% { transform: scaleY(0.25); }
+}
+
+.eq-bar-1 { animation: eqPulse1 0.85s ease-in-out infinite; transform-origin: bottom; }
+.eq-bar-2 { animation: eqPulse2 0.72s ease-in-out infinite; transform-origin: bottom; }
+.eq-bar-3 { animation: eqPulse3 0.94s ease-in-out infinite; transform-origin: bottom; }
+.eq-bar-4 { animation: eqPulse4 0.68s ease-in-out infinite; transform-origin: bottom; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-disc-spin,
+  .eq-bar-1,
+  .eq-bar-2,
+  .eq-bar-3,
+  .eq-bar-4 {
+    animation: none !important;
+  }
+}

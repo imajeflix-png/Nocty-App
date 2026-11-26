@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="id" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nocty — Immersive Music Player</title>
+    <meta
+      name="description"
+      content="Pemutar musik web ringan, cepat, dan bebas bloat dengan streaming lagu penuh, penyimpanan MP3 lokal permanen, dan lirik sinkron otomatis."
+    />
+    <meta property="og:title" content="Nocty — Immersive Music Player" />
+    <meta
+      property="og:description"
+      content="Pemutar musik web ringan, cepat, dan bebas bloat dengan streaming lagu penuh, penyimpanan MP3 lokal permanen, dan lirik sinkron otomatis."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      window.addEventListener(
+        'error',
+        function (event) {
+          var src = (event && event.filename) || '';
+          var stack = (event && event.error && event.error.stack) || '';
+          if (src.indexOf('chrome-extension://') === 0 || stack.indexOf('chrome-extension://') !== -1) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        },
+        true
+      );
+    </script>
+  </head>
+  <body class="bg-[#0B0B0F] text-[#F4F4F6] antialiased selection:bg-emerald-500/30 selection:text-lime-200">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
