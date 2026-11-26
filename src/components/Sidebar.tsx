@@ -15,6 +15,8 @@ export const Sidebar: React.FC = () => {
     trackRegistry,
     setIsCreatePlaylistOpen,
     uploadLocalFiles,
+    isInstallable,
+    promptInstallApp,
   } = usePlayer();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -180,7 +182,16 @@ export const Sidebar: React.FC = () => {
       </div>
 
       {/* Bottom Upload MP3 Trigger */}
-      <div className="p-3 border-t border-white/[0.07]">
+      <div className="p-3 border-t border-white/[0.07] space-y-2">
+        {isInstallable && (
+          <button
+            type="button"
+            onClick={promptInstallApp}
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-semibold text-[#0B0B0D] bg-white hover:bg-white/90 transition-colors whitespace-nowrap shadow-md"
+          >
+            <span>✨ Install App (PWA)</span>
+          </button>
+        )}
         <input
           ref={fileInputRef}
           type="file"

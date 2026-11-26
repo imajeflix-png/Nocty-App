@@ -54,9 +54,9 @@ const HorizontalTrackShelf: React.FC<HorizontalShelfProps> = ({ title, tracks, i
       </div>
 
       {isLoading ? (
-        <div className="flex gap-4 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 pb-2 no-scrollbar">
+        <div className="flex gap-3.5 sm:gap-4 overflow-x-auto -mx-5 px-5 sm:mx-0 sm:px-0 pb-2 no-scrollbar">
           {Array.from({ length: 6 }).map((_, idx) => (
-            <div key={idx} className="w-[156px] sm:w-[176px] lg:w-[184px] shrink-0 space-y-2.5">
+            <div key={idx} className="w-[148px] sm:w-[176px] lg:w-[184px] shrink-0 space-y-2.5">
               <div className="aspect-square w-full rounded-xl bg-white/[0.06] animate-pulse" />
               <div className="h-3.5 w-3/4 rounded bg-white/[0.06] animate-pulse" />
               <div className="h-3 w-1/2 rounded bg-white/[0.04] animate-pulse" />
@@ -66,7 +66,7 @@ const HorizontalTrackShelf: React.FC<HorizontalShelfProps> = ({ title, tracks, i
       ) : (
         <div
           ref={scrollRef}
-          className="overflow-x-auto flex gap-4 -mx-4 px-4 sm:mx-0 sm:px-0 pb-2 no-scrollbar snap-x snap-mandatory"
+          className="overflow-x-auto flex gap-3.5 sm:gap-4 -mx-5 px-5 sm:mx-0 sm:px-0 pb-2 no-scrollbar snap-x snap-mandatory"
         >
           {tracks.map((track) => {
             const active = currentTrack?.id === track.id;
@@ -85,7 +85,7 @@ const HorizontalTrackShelf: React.FC<HorizontalShelfProps> = ({ title, tracks, i
                     playTrack(track, tracks);
                   }
                 }}
-                className="group w-[156px] sm:w-[176px] lg:w-[184px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-xl"
+                className="group w-[148px] sm:w-[176px] lg:w-[184px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-xl"
               >
                 <div className="relative aspect-square w-full rounded-xl overflow-hidden shadow-lg shadow-black/50">
                   <CoverArt
@@ -374,7 +374,7 @@ export const HomeView: React.FC = () => {
           Suasana &amp; Mood
         </h2>
 
-        <div className="overflow-x-auto flex gap-4 -mx-4 px-4 sm:mx-0 sm:px-0 pb-2 no-scrollbar snap-x snap-mandatory">
+        <div className="overflow-x-auto flex gap-3.5 sm:gap-4 -mx-5 px-5 sm:mx-0 sm:px-0 pb-2 no-scrollbar snap-x snap-mandatory">
           {MOOD_CATEGORIES.map((mood) => {
             const isLoading = loadingMoodId === mood.id;
             return (
@@ -389,7 +389,7 @@ export const HomeView: React.FC = () => {
                     handleMoodClick(mood);
                   }
                 }}
-                className="group w-[156px] sm:w-[176px] lg:w-[184px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-xl"
+                className="group w-[148px] sm:w-[176px] lg:w-[184px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-xl"
               >
                 <div className="relative aspect-square w-full rounded-xl overflow-hidden shadow-lg shadow-black/50">
                   <img

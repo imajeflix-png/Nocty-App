@@ -46,7 +46,7 @@ const NoctyShell: React.FC = () => {
         <Sidebar />
 
         {/* Spacious Frosted Glass Main View */}
-        <main className="relative flex-1 min-w-0 h-full rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] overflow-y-auto scroll-pt-8">
+        <main className="relative flex-1 min-w-0 h-full rounded-2xl bg-[#0B0B0D]/60 backdrop-blur-xl border border-white/[0.08] overflow-y-auto scroll-pt-8">
           {/* Soft Cover-Adaptive Ambient Aura inside Main View */}
           <div
             aria-hidden="true"

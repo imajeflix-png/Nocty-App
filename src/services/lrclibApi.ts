@@ -48,8 +48,14 @@ function writeLocalCache(key: string, entry: CachedLyricEntry): void {
   }
 }
 
-async function queryLrcLibGet(artist: string, title: string, signal?: AbortSignal): Promise<LrcLibResponse | null> {
-  const url = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(title)}`;
+async function queryLrcLibGet(
+  artist: string,
+  title: string,
+  duration?: number,
+  signal?: AbortSignal
+): Promise<LrcLibResponse | null> {
+  const durParam = duration && duration > 0 ? `&duration=${Math.round(duration)}` : '';
+  const url = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(title)}${durParam}`;
   const res = await fetch(url, { signal });
   if (!res.ok) return null;
   return (await res.json()) as LrcLibResponse;
@@ -67,6 +73,7 @@ async function queryLrcLibSearch(query: string, signal?: AbortSignal): Promise<L
 export async function fetchSyncedLyrics(
   artist: string,
   title: string,
+  duration?: number,
   signal?: AbortSignal
 ): Promise<{ synced: LyricLine[]; plain?: string }> {
   const cleaned = cleanTrackMetaForLyrics(artist, title);
@@ -86,12 +93,12 @@ export async function fetchSyncedLyrics(
   let match: LrcLibResponse | null = null;
 
   try {
-    // 1. Try exact cleaned artist + title
-    match = await queryLrcLibGet(cleaned.artist, cleaned.title, signal);
+    // 1. Try exact cleaned artist + title + duration
+    match = await queryLrcLibGet(cleaned.artist, cleaned.title, duration, signal);
 
     // 2. Try raw artist + cleaned title if different
-    if (!match && artist.trim() !== cleaned.artist) {
-      match = await queryLrcLibGet(artist.trim(), cleaned.title, signal);
+    if (!match || (!match.syncedLyrics && !match.plainLyrics)) {
+      match = await queryLrcLibGet(artist.trim(), cleaned.title, duration, signal);
     }
 
     // 3. Fallback to LRCLIB search endpoint for partial/collaborative matches
@@ -100,7 +107,7 @@ export async function fetchSyncedLyrics(
       if (searchHit) match = searchHit;
     }
 
-    // 4. Fallback title-only search when Piped uploader is a channel/label name rather than the artist
+    // 4. Fallback title-only search
     if ((!match || (!match.syncedLyrics && !match.plainLyrics)) && cleaned.title.length >= 3) {
       const titleOnlyHit = await queryLrcLibSearch(cleaned.title, signal);
       if (titleOnlyHit) match = titleOnlyHit;

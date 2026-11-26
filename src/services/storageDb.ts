@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
   SAVED_TRACKS: 'nocty_saved_tracks_v1',
   PREFS: 'nocty_player_prefs_v1',
   AMBIENT_VIDEO: 'nocty_ambient_video',
+  AUTOPLAY: 'nocty_autoplay',
 };
 
 interface StoredLocalTrackRecord {
@@ -298,3 +299,22 @@ export function saveAmbientVideoPref(enabled: boolean): void {
     // Ignore
   }
 }
+
+export function loadAutoplayPref(): boolean {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.AUTOPLAY);
+    if (raw === null) return true;
+    return raw !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+export function saveAutoplayPref(enabled: boolean): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.AUTOPLAY, String(enabled));
+  } catch {
+    // Ignore
+  }
+}
+

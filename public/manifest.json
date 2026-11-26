@@ -1,0 +1,21 @@
+{
+  "name": "Nocty — Immersive Music Player",
+  "short_name": "Nocty",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B0B0D",
+  "theme_color": "#0B0B0D",
+  "description": "Pemutar musik web ringan dan imersif dengan streaming audio penuh, penyimpanan MP3 lokal permanen, dan lirik sinkron otomatis.",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

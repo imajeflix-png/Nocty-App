@@ -22,12 +22,14 @@ import {
   extractLocalFileDuration,
   getAllLocalTracksFromDb,
   loadAmbientVideoPref,
+  loadAutoplayPref,
   loadLikedIdsFromStorage,
   loadPlayerPrefs,
   loadPlaylistsFromStorage,
   loadSavedTracksFromStorage,
   parseFileNameMeta,
   saveAmbientVideoPref,
+  saveAutoplayPref,
   saveLikedIdsToStorage,
   saveLocalTrackToDb,
   savePlayerPrefs,
@@ -186,6 +188,18 @@ interface PlayerContextValue {
   setCrossfadeDuration: (seconds: number) => void;
   cycleCrossfadeDuration: () => void;
 
+  // Autoplay Radio Stream
+  isAutoplayEnabled: boolean;
+  toggleAutoplay: () => void;
+
+  // Synced Lyrics Offset
+  lyricOffset: number;
+  setLyricOffset: (offset: number | ((prev: number) => number)) => void;
+
+  // PWA Install Prompt
+  isInstallable: boolean;
+  promptInstallApp: () => Promise<void>;
+
   // Notifications
   toasts: ToastMessage[];
   pushToast: (text: string, tone?: ToastMessage['tone']) => void;
@@ -292,6 +306,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [crossfadeDuration, setCrossfadeDurationState] = useState<number>(
     initialPrefs.crossfadeDuration
   );
+  const [isAutoplayEnabled, setIsAutoplayEnabled] = useState<boolean>(() => loadAutoplayPref());
+  const [lyricOffset, setLyricOffset] = useState<number>(0);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstallable, setIsInstallable] = useState<boolean>(false);
   const [activeYtDeck, setActiveYtDeck] = useState<0 | 1>(0);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
@@ -341,6 +359,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   isPlayingRef.current = isPlaying;
   const crossfadeDurationRef = useRef(crossfadeDuration);
   crossfadeDurationRef.current = crossfadeDuration;
+  const isAutoplayEnabledRef = useRef(isAutoplayEnabled);
+  isAutoplayEnabledRef.current = isAutoplayEnabled;
 
   const pushToast = useCallback((text: string, tone: ToastMessage['tone'] = 'info') => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
@@ -397,6 +417,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     saveAmbientVideoPref(isAmbientVideoEnabled);
   }, [isAmbientVideoEnabled]);
 
+  useEffect(() => {
+    saveAutoplayPref(isAutoplayEnabled);
+  }, [isAutoplayEnabled]);
+
   const toggleAmbientVideo = useCallback(() => {
     setIsAmbientVideoEnabled((prev) => {
       const next = !prev;
@@ -404,6 +428,40 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return next;
     });
   }, [pushToast]);
+
+  const toggleAutoplay = useCallback(() => {
+    setIsAutoplayEnabled((prev) => {
+      const next = !prev;
+      pushToast(next ? 'Autoplay Radio Stream aktif' : 'Autoplay dimatikan', 'info');
+      return next;
+    });
+  }, [pushToast]);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const promptInstallApp = useCallback(async () => {
+    if (!deferredPrompt) {
+      pushToast('Aplikasi sudah ter-install atau tidak didukung browser ini.', 'info');
+      return;
+    }
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      pushToast('Terima kasih telah meng-install Nocty!', 'success');
+    }
+    setDeferredPrompt(null);
+    setIsInstallable(false);
+  }, [deferredPrompt, pushToast]);
+
+
 
   const setCrossfadeDuration = useCallback(
     (seconds: number) => {
@@ -530,6 +588,52 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [currentTrackId, trackRegistry]
   );
 
+  // Web Media Session API integration
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    if (!currentTrack) {
+      navigator.mediaSession.metadata = null;
+      return;
+    }
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: currentTrack.title,
+      artist: currentTrack.artist,
+      album: currentTrack.album || 'Nocty Music',
+      artwork: [
+        { src: currentTrack.coverUrl, sizes: '96x96', type: 'image/jpeg' },
+        { src: currentTrack.coverUrl, sizes: '128x128', type: 'image/jpeg' },
+        { src: currentTrack.coverUrl, sizes: '192x192', type: 'image/jpeg' },
+        { src: currentTrack.coverUrl, sizes: '256x256', type: 'image/jpeg' },
+        { src: currentTrack.coverUrl, sizes: '384x384', type: 'image/jpeg' },
+        { src: currentTrack.coverUrl, sizes: '512x512', type: 'image/jpeg' },
+      ],
+    });
+
+    navigator.mediaSession.setActionHandler('play', () => togglePlayPauseRef.current());
+    navigator.mediaSession.setActionHandler('pause', () => togglePlayPauseRef.current());
+    navigator.mediaSession.setActionHandler('previoustrack', () => playPrevRef.current());
+    navigator.mediaSession.setActionHandler('nexttrack', () => playNextRef.current());
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+      if (details.seekTime !== undefined) seekToRef.current(details.seekTime);
+    });
+  }, [currentTrack?.id]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      if ('setPositionState' in navigator.mediaSession && duration > 0 && Number.isFinite(currentTime)) {
+        navigator.mediaSession.setPositionState({
+          duration: Math.max(0, duration),
+          playbackRate: 1,
+          position: Math.max(0, Math.min(currentTime, duration)),
+        });
+      }
+    } catch {
+      // Ignore
+    }
+  }, [currentTime, duration]);
+
   useEffect(() => {
     if (!currentTrack) return;
     let cancelled = false;
@@ -565,7 +669,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return { ...prev, [targetId]: { ...t, lyricsStatus: 'loading' } };
     });
 
-    fetchSyncedLyrics(currentTrack.artist, currentTrack.title, controller.signal)
+    fetchSyncedLyrics(currentTrack.artist, currentTrack.title, currentTrack.duration, controller.signal)
       .then(({ synced, plain }) => {
         if (controller.signal.aborted) return;
         setTrackRegistry((prev) => {
@@ -1055,6 +1159,37 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
 
+      if (isAutoplayEnabledRef.current && curId) {
+        const currentTrackObj = trackRegistryRef.current[curId];
+        if (currentTrackObj) {
+          setIsBuffering(true);
+          searchOnlineTracks(`${currentTrackObj.artist} hits ${currentTrackObj.title}`, undefined, 20)
+            .then(({ tracks }) => {
+              const fresh = tracks.filter((t) => !queueIdsRef.current.includes(t.id));
+              if (fresh.length > 0) {
+                registerTracks(fresh);
+                const newIds = fresh.map((t) => t.id);
+                setOriginalQueueIds((prev) => [...prev, ...newIds]);
+                setQueueIds((prev) => [...prev, ...newIds]);
+                const nextId = newIds[0];
+                const nextTrack = trackRegistryRef.current[nextId];
+                if (nextTrack) {
+                  startPlaybackRef.current(nextTrack, false, 'auto');
+                  pushToast(`Autoplay: Memutar lagu rekomendasi dari ${currentTrackObj.artist}`, 'info');
+                  return;
+                }
+              }
+              setIsPlaying(false);
+              setIsBuffering(false);
+            })
+            .catch(() => {
+              setIsPlaying(false);
+              setIsBuffering(false);
+            });
+          return;
+        }
+      }
+
       setIsPlaying(false);
       setIsBuffering(false);
     };
@@ -1430,7 +1565,20 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const playTrack = useCallback(
     (track: Track, contextTracks?: Track[]) => {
-      registerTracks(contextTracks ? [track, ...contextTracks] : [track]);
+      let tracksToUse = contextTracks;
+      if (!tracksToUse || tracksToUse.length === 0) {
+        const pool = [
+          track,
+          ...indonesiaTrending,
+          ...featuredTracks,
+          ...viralTracks,
+          ...indieRnbTracks,
+          ...Object.values(trackRegistryRef.current),
+        ];
+        const unique = Array.from(new Map(pool.map((t) => [t.id, t])).values());
+        tracksToUse = unique.slice(0, 35);
+      }
+      registerTracks(tracksToUse);
 
       if (track.id === currentTrackId && !contextTracks) {
         const deckIdx = activeYtDeckRef.current;
@@ -1588,6 +1736,15 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const prevTrack = trackRegistry[queueIds[prevIdx]];
     if (prevTrack) startPlaybackForTrack(prevTrack, false, 'skip');
   }, [currentTrackId, queueIds, seekTo, startPlaybackForTrack, trackRegistry]);
+
+  const togglePlayPauseRef = useRef(togglePlayPause);
+  togglePlayPauseRef.current = togglePlayPause;
+  const playPrevRef = useRef(playPrev);
+  playPrevRef.current = playPrev;
+  const playNextRef = useRef(playNext);
+  playNextRef.current = playNext;
+  const seekToRef = useRef(seekTo);
+  seekToRef.current = seekTo;
 
   const setVolume = useCallback(
     (vol: number) => {
@@ -2032,6 +2189,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     crossfadeDuration,
     setCrossfadeDuration,
     cycleCrossfadeDuration,
+    isAutoplayEnabled,
+    toggleAutoplay,
+    lyricOffset,
+    setLyricOffset,
+    isInstallable,
+    promptInstallApp,
     toasts,
     pushToast,
   };
@@ -2051,7 +2214,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       >
         <div
           className={`absolute inset-0 transition-opacity duration-1000 ease-out ${
-            showAmbientVideo ? 'opacity-25' : 'opacity-0'
+            showAmbientVideo ? 'opacity-35' : 'opacity-0'
           }`}
         >
           {([0, 1] as const).map((deckIdx) => (
@@ -2060,7 +2223,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               ref={(el) => {
                 ytDeckWrapperRefs.current[deckIdx] = el;
               }}
-              className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full w-[177.78vh] h-[56.25vw] scale-125 blur-2xl [&>iframe]:w-full [&>iframe]:h-full [&>iframe]:pointer-events-none transition-opacity duration-1000 ${
+              className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full w-[177.78vh] h-[56.25vw] scale-125 blur-xl [&>iframe]:w-full [&>iframe]:h-full [&>iframe]:pointer-events-none transition-opacity duration-1000 ${
                 activeYtDeck === deckIdx ? 'opacity-100 z-10' : 'opacity-0 z-0'
               }`}
             />
@@ -2069,7 +2232,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         <div
           className={`absolute inset-0 transition-opacity duration-1000 ${
             showAmbientVideo
-              ? 'bg-gradient-to-b from-[#0B0B0D]/25 via-[#0B0B0D]/45 to-[#0B0B0D]/80'
+              ? 'bg-gradient-to-b from-black/40 via-black/60 to-black/85'
               : 'bg-gradient-to-b from-[#0B0B0D]/60 via-[#0B0B0D]/80 to-[#0B0B0D]'
           }`}
         />
