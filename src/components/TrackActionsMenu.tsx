@@ -44,7 +44,7 @@ export const TrackActionsMenu: React.FC<TrackActionsMenuProps> = ({
           setOpen((v) => !v);
         }}
         aria-label={`Opsi untuk ${track.title}`}
-        className="w-9 h-9 rounded-lg flex items-center justify-center text-[#9499A6] hover:text-white hover:bg-white/[0.06] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+        className="w-9 h-9 rounded-lg flex items-center justify-center text-white/45 hover:text-white hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
       >
         <MoreHorizontal className="w-4 h-4" strokeWidth={1.75} />
       </button>
@@ -52,7 +52,7 @@ export const TrackActionsMenu: React.FC<TrackActionsMenuProps> = ({
       {open && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute right-0 top-10 z-50 w-56 rounded-xl bg-[#16161F]/95 backdrop-blur-xl border border-white/[0.1] shadow-2xl p-1.5 text-sm text-[#F4F4F6]"
+          className="absolute right-0 top-10 z-50 w-56 rounded-2xl bg-[#18181D]/92 backdrop-blur-2xl border border-white/[0.10] shadow-2xl p-1.5 text-sm text-white"
         >
           <button
             type="button"
@@ -60,9 +60,9 @@ export const TrackActionsMenu: React.FC<TrackActionsMenuProps> = ({
               addToQueue(track, true);
               setOpen(false);
             }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left hover:bg-white/[0.06] transition-colors whitespace-nowrap"
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/10 transition-colors whitespace-nowrap"
           >
-            <Play className="w-4 h-4 text-emerald-400 shrink-0" strokeWidth={1.75} />
+            <Play className="w-4 h-4 text-white/80 shrink-0" strokeWidth={1.75} />
             <span className="truncate">Putar Berikutnya</span>
           </button>
 
@@ -72,15 +72,15 @@ export const TrackActionsMenu: React.FC<TrackActionsMenuProps> = ({
               addToQueue(track, false);
               setOpen(false);
             }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left hover:bg-white/[0.06] transition-colors whitespace-nowrap"
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/10 transition-colors whitespace-nowrap"
           >
-            <ListPlus className="w-4 h-4 text-[#9499A6] shrink-0" strokeWidth={1.75} />
+            <ListPlus className="w-4 h-4 text-white/60 shrink-0" strokeWidth={1.75} />
             <span className="truncate">Tambahkan ke Antrean</span>
           </button>
 
           <div className="my-1 border-t border-white/[0.07]" />
 
-          <div className="px-3 py-1 text-xs text-[#9499A6]">Simpan ke Playlist</div>
+          <div className="px-3 py-1 text-xs text-white/45">Simpan ke Playlist</div>
 
           {playlists.length === 0 ? (
             <button
@@ -89,7 +89,7 @@ export const TrackActionsMenu: React.FC<TrackActionsMenuProps> = ({
                 setOpen(false);
                 setIsCreatePlaylistOpen(true);
               }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-emerald-400 hover:bg-emerald-500/10 transition-colors whitespace-nowrap"
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left text-white hover:bg-white/10 transition-colors whitespace-nowrap"
             >
               <Plus className="w-4 h-4 shrink-0" strokeWidth={1.75} />
               <span>Buat Playlist Baru</span>
@@ -104,10 +104,10 @@ export const TrackActionsMenu: React.FC<TrackActionsMenuProps> = ({
                     addTrackToPlaylist(pl.id, track);
                     setOpen(false);
                   }}
-                  className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left hover:bg-white/[0.06] transition-colors"
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-left hover:bg-white/10 transition-colors"
                 >
                   <span className="truncate">{pl.name}</span>
-                  <Plus className="w-3.5 h-3.5 text-[#9499A6] shrink-0" strokeWidth={1.75} />
+                  <Plus className="w-3.5 h-3.5 text-white/55 shrink-0" strokeWidth={1.75} />
                 </button>
               ))}
             </div>
@@ -122,7 +122,7 @@ export const TrackActionsMenu: React.FC<TrackActionsMenuProps> = ({
                   removeTrackFromPlaylist(playlistIdContext, track.id);
                   setOpen(false);
                 }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-rose-400 hover:bg-rose-500/10 transition-colors whitespace-nowrap"
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left text-rose-300 hover:bg-rose-500/15 transition-colors whitespace-nowrap"
               >
                 <Trash2 className="w-4 h-4 shrink-0" strokeWidth={1.75} />
                 <span>Hapus dari Playlist</span>
@@ -139,7 +139,7 @@ export const TrackActionsMenu: React.FC<TrackActionsMenuProps> = ({
                   deleteLocalTrack(track.id);
                   setOpen(false);
                 }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-rose-400 hover:bg-rose-500/10 transition-colors whitespace-nowrap"
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left text-rose-300 hover:bg-rose-500/15 transition-colors whitespace-nowrap"
               >
                 <Trash2 className="w-4 h-4 shrink-0" strokeWidth={1.75} />
                 <span>Hapus File Lokal</span>

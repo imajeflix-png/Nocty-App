@@ -34,17 +34,17 @@ export const CreatePlaylistModal: React.FC = () => {
         aria-modal="true"
         aria-labelledby="create-playlist-title"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl bg-[#121218] border border-white/[0.1] p-6 shadow-2xl"
+        className="w-full max-w-md rounded-2xl bg-[#16161B]/90 backdrop-blur-2xl border border-white/[0.10] p-6 shadow-2xl"
       >
         <div className="flex items-center justify-between mb-5">
-          <h2 id="create-playlist-title" className="text-lg font-semibold text-white">
+          <h2 id="create-playlist-title" className="font-display text-lg font-semibold text-white">
             Buat Playlist Baru
           </h2>
           <button
             type="button"
             onClick={() => setIsCreatePlaylistOpen(false)}
             aria-label="Tutup"
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-[#9499A6] hover:text-white hover:bg-white/[0.06] transition-colors"
+            className="w-9 h-9 rounded-full flex items-center justify-center text-white/55 hover:text-white hover:bg-white/10 transition-colors"
           >
             <X className="w-4 h-4" strokeWidth={1.75} />
           </button>
@@ -52,7 +52,7 @@ export const CreatePlaylistModal: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="playlist-name" className="block text-xs font-medium text-[#9499A6] mb-1.5">
+            <label htmlFor="playlist-name" className="block text-xs font-medium text-white/60 mb-1.5">
               Nama Playlist
             </label>
             <input
@@ -64,12 +64,12 @@ export const CreatePlaylistModal: React.FC = () => {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Misal: Fokus Larut Malam"
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[#0B0B0F] border border-white/[0.1] text-sm text-white placeholder-[#5B6070] focus:outline-none focus:border-emerald-400/70 transition-colors"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.06] border border-white/[0.08] text-sm text-white placeholder-white/35 focus:outline-none focus:border-white/30 transition-colors"
             />
           </div>
 
           <div>
-            <label htmlFor="playlist-desc" className="block text-xs font-medium text-[#9499A6] mb-1.5">
+            <label htmlFor="playlist-desc" className="block text-xs font-medium text-white/60 mb-1.5">
               Deskripsi Singkat (Opsional)
             </label>
             <input
@@ -79,7 +79,7 @@ export const CreatePlaylistModal: React.FC = () => {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Campuran lagu lokal & streaming favorit"
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[#0B0B0F] border border-white/[0.1] text-sm text-white placeholder-[#5B6070] focus:outline-none focus:border-emerald-400/70 transition-colors"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.06] border border-white/[0.08] text-sm text-white placeholder-white/35 focus:outline-none focus:border-white/30 transition-colors"
             />
           </div>
 
@@ -87,14 +87,14 @@ export const CreatePlaylistModal: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsCreatePlaylistOpen(false)}
-              className="px-4 py-2 rounded-xl text-sm font-medium text-[#9499A6] hover:text-white hover:bg-white/[0.05] transition-colors whitespace-nowrap"
+              className="px-4 py-2 rounded-full text-sm font-medium bg-white/10 hover:bg-white/15 text-white transition-colors whitespace-nowrap"
             >
               Batal
             </button>
             <button
               type="submit"
               disabled={!name.trim()}
-              className="px-5 py-2 rounded-xl text-sm font-semibold text-[#0B0B0F] bg-neon-gradient hover:brightness-110 disabled:opacity-40 transition-all whitespace-nowrap"
+              className="px-5 py-2 rounded-full text-sm font-semibold text-[#0B0B0D] bg-white hover:bg-white/90 disabled:opacity-40 transition-all whitespace-nowrap"
             >
               Simpan Playlist
             </button>

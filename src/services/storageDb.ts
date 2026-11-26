@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   LIKED_IDS: 'nocty_liked_ids_v1',
   SAVED_TRACKS: 'nocty_saved_tracks_v1',
   PREFS: 'nocty_player_prefs_v1',
+  AMBIENT_VIDEO: 'nocty_ambient_video',
 };
 
 interface StoredLocalTrackRecord {
@@ -28,6 +29,7 @@ export interface PlayerPrefs {
   isMuted: boolean;
   isShuffled: boolean;
   loopMode: LoopMode;
+  crossfadeDuration: number;
 }
 
 function openAudioDb(): Promise<IDBDatabase> {
@@ -172,7 +174,6 @@ export function parseFileNameMeta(fileName: string): { title: string; artist: st
   };
 }
 
-// localStorage persistence helpers
 export function loadPlaylistsFromStorage(): Playlist[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PLAYLISTS);
@@ -224,14 +225,11 @@ export function loadSavedTracksFromStorage(): Record<string, Track> {
 
 export function saveSavedTracksToStorage(tracksMap: Record<string, Track>): void {
   try {
-    // Never persist volatile blob ObjectURLs for local tracks in localStorage
     const sanitized: Record<string, Track> = {};
     for (const [id, track] of Object.entries(tracksMap)) {
       if (track.sourceType === 'local') continue;
       sanitized[id] = {
         ...track,
-        // Piped stream URLs expire over time; clear volatile stream URL on snapshot
-        audioUrl: track.isPreview ? track.audioUrl : undefined,
         lyricsStatus: track.lyrics.length > 0 ? 'loaded' : 'idle',
       };
     }
@@ -245,7 +243,13 @@ export function loadPlayerPrefs(): PlayerPrefs {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PREFS);
     if (!raw) {
-      return { volume: 0.8, isMuted: false, isShuffled: false, loopMode: 'off' };
+      return {
+        volume: 0.8,
+        isMuted: false,
+        isShuffled: false,
+        loopMode: 'off',
+        crossfadeDuration: 5,
+      };
     }
     const parsed = JSON.parse(raw);
     return {
@@ -253,15 +257,43 @@ export function loadPlayerPrefs(): PlayerPrefs {
       isMuted: Boolean(parsed.isMuted),
       isShuffled: Boolean(parsed.isShuffled),
       loopMode: parsed.loopMode === 'all' || parsed.loopMode === 'one' ? parsed.loopMode : 'off',
+      crossfadeDuration:
+        typeof parsed.crossfadeDuration === 'number'
+          ? Math.max(0, Math.min(12, Math.round(parsed.crossfadeDuration)))
+          : 5,
     };
   } catch {
-    return { volume: 0.8, isMuted: false, isShuffled: false, loopMode: 'off' };
+    return {
+      volume: 0.8,
+      isMuted: false,
+      isShuffled: false,
+      loopMode: 'off',
+      crossfadeDuration: 5,
+    };
   }
 }
 
 export function savePlayerPrefs(prefs: PlayerPrefs): void {
   try {
     localStorage.setItem(STORAGE_KEYS.PREFS, JSON.stringify(prefs));
+  } catch {
+    // Ignore
+  }
+}
+
+export function loadAmbientVideoPref(): boolean {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.AMBIENT_VIDEO);
+    if (raw === null) return true;
+    return raw !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+export function saveAmbientVideoPref(enabled: boolean): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.AMBIENT_VIDEO, String(enabled));
   } catch {
     // Ignore
   }

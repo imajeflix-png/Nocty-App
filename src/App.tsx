@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { Menu, Search } from 'lucide-react';
+import React from 'react';
 import { PlayerProvider, usePlayer } from './context/PlayerContext';
+import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { HomeView } from './components/HomeView';
 import { ExploreView } from './components/ExploreView';
 import { CollectionView } from './components/CollectionView';
+import { LibraryView } from './components/LibraryView';
 import { RightInspectorPanel } from './components/RightInspectorPanel';
 import { FloatingPlayerDock } from './components/FloatingPlayerDock';
 import { ZenFocusMode } from './components/ZenFocusMode';
@@ -13,87 +14,86 @@ import { MobileNavBar } from './components/MobileNavBar';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 const NoctyShell: React.FC = () => {
-  const { activeView, setActiveView, ambientColor, toasts } = usePlayer();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { activeView, ambientPalette, toasts } = usePlayer();
+  const { primary, secondary } = ambientPalette;
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-[#0B0B0F] text-[#F4F4F6] flex">
-      {/* Left Minimalist Sidebar */}
-      <Sidebar mobileOpen={mobileMenuOpen} onCloseMobile={() => setMobileMenuOpen(false)} />
-
-      {/* Center Scrollable Main Stage with Dynamic Ambient Backdrop */}
-      <main className="relative flex-1 min-w-0 h-full overflow-y-auto">
-        {/* Adaptive Cover Radial Ambient Glow */}
+    <div className="relative z-10 h-screen w-screen overflow-hidden bg-transparent text-[#F5F5F7] flex flex-col">
+      {/* Global Dual-Color Dynamic Ambient Gradient Backdrop */}
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 overflow-hidden z-0">
         <div
-          aria-hidden="true"
-          className="pointer-events-none fixed lg:absolute inset-x-0 top-0 h-[420px] transition-all duration-1000"
+          className="absolute -top-36 -left-24 w-[62vw] h-[62vw] max-w-[780px] max-h-[780px] rounded-full blur-3xl opacity-25 transition-all duration-1000"
           style={{
-            background: `radial-gradient(ellipse 80% 70% at 35% 0%, rgba(${ambientColor.r}, ${ambientColor.g}, ${ambientColor.b}, 0.20) 0%, rgba(16, 185, 129, 0.06) 45%, transparent 75%)`,
+            background: `radial-gradient(circle, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.95) 0%, transparent 70%)`,
           }}
         />
+        <div
+          className="absolute -bottom-40 -right-24 w-[58vw] h-[58vw] max-w-[720px] max-h-[720px] rounded-full blur-3xl opacity-20 transition-all duration-1000"
+          style={{
+            background: `radial-gradient(circle, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.95) 0%, transparent 70%)`,
+          }}
+        />
+      </div>
 
-        {/* Compact Mobile Top Bar */}
-        <header className="sticky top-0 z-20 lg:hidden flex items-center justify-between px-4 py-3 bg-[#0B0B0F]/80 backdrop-blur-lg border-b border-white/[0.06]">
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen(true)}
-            aria-label="Buka menu navigasi"
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-[#F4F4F6] hover:bg-white/[0.06]"
-          >
-            <Menu className="w-5 h-5" strokeWidth={1.75} />
-          </button>
+      {/* Minimal Top Bar */}
+      <div className="relative z-10 shrink-0">
+        <TopBar />
+      </div>
 
-          <span className="font-display text-lg font-extrabold tracking-tight text-white">
-            Noct<span className="text-neon-gradient">y</span>
-          </span>
+      {/* Airy Glass Workspace */}
+      <div className="relative z-10 flex-1 min-h-0 flex gap-3 px-3 pb-0 lg:pb-3">
+        {/* Compact Frosted Glass Left Sidebar */}
+        <Sidebar />
 
-          <button
-            type="button"
-            onClick={() => setActiveView('explore')}
-            aria-label="Buka pencarian"
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-[#9499A6] hover:text-white hover:bg-white/[0.06]"
-          >
-            <Search className="w-5 h-5" strokeWidth={1.75} />
-          </button>
-        </header>
+        {/* Spacious Frosted Glass Main View */}
+        <main className="relative flex-1 min-w-0 h-full rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] overflow-y-auto scroll-pt-8">
+          {/* Soft Cover-Adaptive Ambient Aura inside Main View */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-24 inset-x-0 h-[380px] blur-3xl opacity-25 transition-all duration-1000"
+            style={{
+              background: `
+                radial-gradient(ellipse 65% 60% at 22% 15%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.9) 0%, transparent 72%),
+                radial-gradient(ellipse 55% 55% at 78% 10%, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.85) 0%, transparent 70%)
+              `,
+            }}
+          />
 
-        {/* Active View Content */}
-        <div className="relative z-10 max-w-6xl mx-auto px-4 sm:px-7 pt-6 sm:pt-8 pb-36 lg:pb-32">
-          {activeView === 'home' && <HomeView />}
-          {activeView === 'explore' && <ExploreView />}
-          {activeView === 'liked' && <CollectionView mode="liked" />}
-          {activeView === 'playlist' && <CollectionView mode="playlist" />}
-        </div>
-      </main>
+          <div className="relative z-10 max-w-[1360px] mx-auto px-4 sm:px-7 pt-8 sm:pt-10 pb-36 lg:pb-12">
+            {activeView === 'home' && <HomeView />}
+            {activeView === 'explore' && <ExploreView />}
+            {activeView === 'liked' && <CollectionView mode="liked" />}
+            {activeView === 'local' && <CollectionView mode="local" />}
+            {activeView === 'playlist' && <CollectionView mode="playlist" />}
+            {activeView === 'library' && <LibraryView />}
+          </div>
+        </main>
 
-      {/* Right Toggleable Queue & Synced Lyrics Inspector */}
-      <RightInspectorPanel />
+        {/* Right Panel: Queue & Synced Lyrics (Default CLOSED) */}
+        <RightInspectorPanel />
+      </div>
 
-      {/* Glassmorphism Floating Bottom Audio Player Dock */}
-      <FloatingPlayerDock />
+      {/* Floating Frosted Glass Player Bar + Mobile Mini-Player */}
+      <div className="relative z-20 shrink-0">
+        <FloatingPlayerDock />
+      </div>
 
-      {/* Mobile Bottom Navigation */}
+      {/* Mobile 3-Tab Bottom Navigation */}
       <MobileNavBar />
 
-      {/* Immersive Zen / Focus Mode Overlay */}
+      {/* Fullscreen Zen / Now Playing Overlay */}
       <ZenFocusMode />
 
       {/* Create Playlist Modal */}
       <CreatePlaylistModal />
 
-      {/* Non-blocking Toast Notifications */}
+      {/* Non-Blocking Frosted Glass Toast Notifications */}
       {toasts.length > 0 && (
-        <div className="fixed top-4 right-4 z-[60] space-y-2 pointer-events-none">
+        <div className="fixed top-[68px] right-4 z-[60] space-y-2 pointer-events-none">
           {toasts.map((toast) => (
             <div
               key={toast.id}
-              className={`px-4 py-2.5 rounded-xl text-xs font-medium backdrop-blur-xl border shadow-xl transition-all ${
-                toast.tone === 'error'
-                  ? 'bg-rose-950/90 border-rose-500/35 text-rose-200'
-                  : toast.tone === 'success'
-                    ? 'bg-[#121816]/90 border-emerald-400/35 text-lime-200'
-                    : 'bg-[#16161F]/90 border-white/[0.1] text-[#F4F4F6]'
-              }`}
+              className="px-4 py-2.5 rounded-xl text-xs font-medium bg-[#18181D]/85 backdrop-blur-2xl border border-white/[0.10] text-white shadow-2xl transition-all"
             >
               {toast.text}
             </div>

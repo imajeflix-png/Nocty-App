@@ -1,68 +1,52 @@
 import React from 'react';
-import { Compass, Heart, Home, ListOrdered, Mic2 } from 'lucide-react';
+import { Compass, Home, Library } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 
 export const MobileNavBar: React.FC = () => {
-  const { activeView, setActiveView, rightPanelTab, toggleRightPanelTab } = usePlayer();
+  const { activeView, setActiveView } = usePlayer();
+
+  const isLibraryActive =
+    activeView === 'library' ||
+    activeView === 'liked' ||
+    activeView === 'playlist' ||
+    activeView === 'local';
 
   return (
     <nav
       aria-label="Navigasi seluler"
-      className="fixed bottom-0 left-0 right-0 z-30 lg:hidden bg-[#0E0E14]/95 backdrop-blur-xl border-t border-white/[0.08] grid grid-cols-5 h-14"
+      className="fixed bottom-0 left-0 right-0 z-30 lg:hidden bg-[#0B0B0D]/80 backdrop-blur-2xl border-t border-white/[0.08] grid grid-cols-3 h-[54px]"
     >
       <button
         type="button"
         onClick={() => setActiveView('home')}
-        className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium ${
-          activeView === 'home' ? 'text-lime-300' : 'text-[#9499A6]'
+        className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
+          activeView === 'home' ? 'text-white' : 'text-white/50 hover:text-white/80'
         }`}
       >
-        <Home className="w-4 h-4" strokeWidth={1.75} />
+        <Home className="w-[18px] h-[18px]" strokeWidth={activeView === 'home' ? 2.2 : 1.75} />
         <span>Home</span>
       </button>
 
       <button
         type="button"
         onClick={() => setActiveView('explore')}
-        className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium ${
-          activeView === 'explore' ? 'text-lime-300' : 'text-[#9499A6]'
+        className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
+          activeView === 'explore' ? 'text-white' : 'text-white/50 hover:text-white/80'
         }`}
       >
-        <Compass className="w-4 h-4" strokeWidth={1.75} />
+        <Compass className="w-[18px] h-[18px]" strokeWidth={activeView === 'explore' ? 2.2 : 1.75} />
         <span>Explore</span>
       </button>
 
       <button
         type="button"
-        onClick={() => setActiveView('liked')}
-        className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium ${
-          activeView === 'liked' ? 'text-lime-300' : 'text-[#9499A6]'
+        onClick={() => setActiveView('library')}
+        className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
+          isLibraryActive ? 'text-white' : 'text-white/50 hover:text-white/80'
         }`}
       >
-        <Heart className="w-4 h-4" strokeWidth={1.75} />
-        <span>Liked</span>
-      </button>
-
-      <button
-        type="button"
-        onClick={() => toggleRightPanelTab('queue')}
-        className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium ${
-          rightPanelTab === 'queue' ? 'text-lime-300' : 'text-[#9499A6]'
-        }`}
-      >
-        <ListOrdered className="w-4 h-4" strokeWidth={1.75} />
-        <span>Antrean</span>
-      </button>
-
-      <button
-        type="button"
-        onClick={() => toggleRightPanelTab('lyrics')}
-        className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium ${
-          rightPanelTab === 'lyrics' ? 'text-lime-300' : 'text-[#9499A6]'
-        }`}
-      >
-        <Mic2 className="w-4 h-4" strokeWidth={1.75} />
-        <span>Lirik</span>
+        <Library className="w-[18px] h-[18px]" strokeWidth={isLibraryActive ? 2.2 : 1.75} />
+        <span>Library</span>
       </button>
     </nav>
   );

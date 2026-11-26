@@ -28,7 +28,6 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
     return idx;
   }, [syncedLines, currentTime]);
 
-  // Smoothly center the active lyric line whenever it advances
   useEffect(() => {
     if (activeIndex < 0 || userScrolling) return;
     const el = lineRefs.current[activeIndex];
@@ -37,7 +36,6 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
     }
   }, [activeIndex, userScrolling]);
 
-  // Reset refs & scroll when track changes
   useEffect(() => {
     setUserScrolling(false);
     if (containerRef.current) {
@@ -58,9 +56,9 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
   if (!currentTrack) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-center px-6 py-12">
-        <Mic2 className="w-8 h-8 text-[#5B6070] mb-3" strokeWidth={1.5} />
-        <p className="text-sm font-medium text-[#F4F4F6]">Belum ada lagu diputar</p>
-        <p className="mt-1 text-xs text-[#9499A6]">
+        <Mic2 className="w-8 h-8 text-white/25 mb-3" strokeWidth={1.5} />
+        <p className="text-sm font-medium text-white/85">Belum ada lagu diputar</p>
+        <p className="mt-1 text-xs text-white/50">
           Putar lagu apa saja untuk menampilkan lirik sinkron otomatis.
         </p>
       </div>
@@ -70,8 +68,8 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
   if (currentTrack.lyricsStatus === 'loading') {
     return (
       <div className="h-full flex flex-col items-center justify-center text-center px-6 py-12">
-        <Loader2 className="w-7 h-7 text-emerald-400 animate-spin mb-3" strokeWidth={1.75} />
-        <p className="text-sm text-[#9499A6]">Mengambil lirik sinkron dari LRCLIB...</p>
+        <Loader2 className="w-7 h-7 text-white/75 animate-spin mb-3" strokeWidth={1.75} />
+        <p className="text-sm text-white/55">Mengambil lirik sinkron...</p>
       </div>
     );
   }
@@ -83,7 +81,7 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
         onWheel={handleManualScroll}
         onTouchMove={handleManualScroll}
         className={`h-full overflow-y-auto scroll-smooth ${
-          variant === 'zen' ? 'px-2 sm:px-6 py-24 space-y-5' : 'px-4 py-10 space-y-3'
+          variant === 'zen' ? 'px-2 sm:px-6 py-20 space-y-5' : 'px-4 py-10 space-y-3'
         }`}
       >
         {syncedLines.map((line, index) => {
@@ -101,8 +99,8 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
               : isCurrent
                 ? 'opacity-100'
                 : isPast
-                  ? 'opacity-40 hover:opacity-80'
-                  : 'opacity-65 hover:opacity-95';
+                  ? 'opacity-35 hover:opacity-80'
+                  : 'opacity-55 hover:opacity-95';
 
           return (
             <button
@@ -115,8 +113,8 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
                 setUserScrolling(false);
                 seekTo(line.time);
               }}
-              className={`w-full text-left rounded-xl transition-all duration-300 origin-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
-                variant === 'zen' ? 'px-3 py-2' : 'px-2.5 py-1.5 hover:bg-white/[0.04]'
+              className={`w-full text-left rounded-xl transition-all duration-300 origin-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
+                variant === 'zen' ? 'px-3 py-2' : 'px-2.5 py-1.5 hover:bg-white/[0.06]'
               } ${zenBlurClass}`}
             >
               <span
@@ -124,11 +122,7 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
                   variant === 'zen'
                     ? 'font-display text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight'
                     : 'font-display text-[15px] sm:text-base font-semibold'
-                } ${
-                  isCurrent
-                    ? 'text-neon-gradient'
-                    : 'text-[#E4E6EC]'
-                }`}
+                } ${isCurrent ? 'text-white drop-shadow-[0_2px_16px_rgba(255,255,255,0.28)]' : 'text-white/80'}`}
               >
                 {line.text}
               </span>
@@ -143,14 +137,14 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
     return (
       <div
         className={`h-full overflow-y-auto ${
-          variant === 'zen' ? 'px-4 sm:px-8 py-16' : 'px-5 py-6'
+          variant === 'zen' ? 'px-4 sm:px-8 py-14' : 'px-5 py-6'
         }`}
       >
-        <p className="text-xs text-emerald-400/80 mb-4">
+        <p className="text-xs text-white/55 mb-4">
           Lirik teks penuh (timestamp sinkron belum tersedia)
         </p>
         <div
-          className={`whitespace-pre-line leading-relaxed text-[#E4E6EC]/90 ${
+          className={`whitespace-pre-line leading-relaxed text-white/85 ${
             variant === 'zen' ? 'font-display text-xl sm:text-2xl font-semibold' : 'text-sm'
           }`}
         >
@@ -162,10 +156,10 @@ export const SyncedLyricsList: React.FC<SyncedLyricsListProps> = ({ variant = 'p
 
   return (
     <div className="h-full flex flex-col items-center justify-center text-center px-6 py-12">
-      <Mic2 className="w-8 h-8 text-[#5B6070] mb-3" strokeWidth={1.5} />
-      <p className="text-sm font-medium text-[#F4F4F6]">Lirik belum tersedia</p>
-      <p className="mt-1 text-xs text-[#9499A6] max-w-xs leading-relaxed">
-        LRCLIB belum memiliki lirik untuk &ldquo;{currentTrack.title}&rdquo;. Nikmati alunan musiknya!
+      <Mic2 className="w-8 h-8 text-white/25 mb-3" strokeWidth={1.5} />
+      <p className="text-sm font-medium text-white/85">Lirik belum tersedia</p>
+      <p className="mt-1 text-xs text-white/50 max-w-xs leading-relaxed">
+        LRCLIB belum memiliki lirik untuk &ldquo;{currentTrack.title}&rdquo;. Nikmati alunan musiknya.
       </p>
     </div>
   );

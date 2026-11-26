@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import {
   AmbientColor,
+  AmbientPalette,
   LoopMode,
   NavView,
   Playlist,
@@ -20,31 +21,89 @@ import {
   deleteLocalTrackFromDb,
   extractLocalFileDuration,
   getAllLocalTracksFromDb,
+  loadAmbientVideoPref,
   loadLikedIdsFromStorage,
   loadPlayerPrefs,
   loadPlaylistsFromStorage,
   loadSavedTracksFromStorage,
   parseFileNameMeta,
+  saveAmbientVideoPref,
   saveLikedIdsToStorage,
   saveLocalTrackToDb,
   savePlayerPrefs,
   savePlaylistsToStorage,
   saveSavedTracksToStorage,
 } from '../services/storageDb';
-import { resolvePipedStreamUrl, searchOnlineTracks } from '../services/pipedApi';
+import {
+  fetchCuratedFeeds,
+  resolveYouTubeVideoId,
+  searchOnlineTracks,
+  searchYouTubeTracks,
+} from '../services/musicApi';
 import { fetchSyncedLyrics } from '../services/lrclibApi';
-import { extractCoverAmbientColor, fisherYatesShuffle } from '../utils/audioUtils';
+import { extractCoverAmbientPalette, fisherYatesShuffle } from '../utils/audioUtils';
+
+interface YTPlayerInstance {
+  loadVideoById: (videoId: string) => void;
+  playVideo: () => void;
+  pauseVideo: () => void;
+  stopVideo: () => void;
+  seekTo: (seconds: number, allowSeekAhead?: boolean) => void;
+  setVolume: (volume: number) => void;
+  mute: () => void;
+  unMute: () => void;
+  getCurrentTime: () => number;
+  getDuration: () => number;
+  getPlayerState: () => number;
+  destroy: () => void;
+}
+
+interface YTNamespace {
+  Player: new (
+    element: string | HTMLElement,
+    options: {
+      width?: string | number;
+      height?: string | number;
+      videoId?: string;
+      playerVars?: Record<string, string | number>;
+      events?: {
+        onReady?: (event: { target: YTPlayerInstance }) => void;
+        onStateChange?: (event: { data: number; target: YTPlayerInstance }) => void;
+        onError?: (event: { data: number; target: YTPlayerInstance }) => void;
+      };
+    }
+  ) => YTPlayerInstance;
+  PlayerState: {
+    UNSTARTED: number;
+    ENDED: number;
+    PLAYING: number;
+    PAUSED: number;
+    BUFFERING: number;
+    CUED: number;
+  };
+}
+
+declare global {
+  interface Window {
+    YT?: YTNamespace;
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
 
 interface ToastMessage {
   id: number;
   text: string;
-  tone: 'info' | 'success' | 'error';
+  tone: 'info' | 'success';
 }
 
+type PlaybackEngine = 'youtube' | 'html5' | null;
+
 interface PlayerContextValue {
-  // Navigation & Panels
+  // Navigation & Global Search
   activeView: NavView;
   setActiveView: (view: NavView) => void;
+  searchQuery: string;
+  setSearchQuery: (q: string) => void;
   selectedPlaylistId: string | null;
   openPlaylist: (playlistId: string) => void;
   rightPanelTab: RightPanelTab;
@@ -71,12 +130,12 @@ interface PlayerContextValue {
   uploadLocalFiles: (files: FileList | File[], targetPlaylistId?: string) => Promise<void>;
   deleteLocalTrack: (trackId: string) => Promise<void>;
 
-  // Home Trending Feeds
+  // Home & Explore Dynamic Curated Feeds
+  featuredTracks: Track[];
   indonesiaTrending: Track[];
-  globalTrending: Track[];
+  viralTracks: Track[];
+  indieRnbTracks: Track[];
   isTrendingLoading: boolean;
-  trendingError: string | null;
-  trendingSource: 'piped' | 'itunes-fallback' | 'emergency';
   refreshTrending: () => Promise<void>;
 
   // Active Playback & Queue
@@ -92,6 +151,7 @@ interface PlayerContextValue {
   queueIds: string[];
   queueTracks: Track[];
   ambientColor: AmbientColor;
+  ambientPalette: AmbientPalette;
 
   // Player Actions
   playTrack: (track: Track, contextTracks?: Track[]) => void;
@@ -108,6 +168,24 @@ interface PlayerContextValue {
   reorderQueue: (fromIndex: number, toIndex: number) => void;
   clearUpcomingQueue: () => void;
 
+  // Sleep Timer
+  sleepTimerRemaining: number | null;
+  sleepTimerMode: 'off' | 'countdown' | 'end_of_track';
+  setSleepTimerMinutes: (minutes: number) => void;
+  setSleepTimerEndOfTrack: () => void;
+  cancelSleepTimer: () => void;
+
+  // Ambient Video Backdrop
+  activeEngine: PlaybackEngine;
+  isAmbientVideoEnabled: boolean;
+  setIsAmbientVideoEnabled: (enabled: boolean) => void;
+  toggleAmbientVideo: () => void;
+
+  // Cross-fade Audio Transitions
+  crossfadeDuration: number;
+  setCrossfadeDuration: (seconds: number) => void;
+  cycleCrossfadeDuration: () => void;
+
   // Notifications
   toasts: ToastMessage[];
   pushToast: (text: string, tone?: ToastMessage['tone']) => void;
@@ -115,15 +193,57 @@ interface PlayerContextValue {
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
-const STREAM_CACHE_TTL_MS = 20 * 60 * 1000;
+let ytScriptPromise: Promise<void> | null = null;
+
+function loadYouTubeIframeApi(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (window.YT?.Player) return Promise.resolve();
+  if (ytScriptPromise) return ytScriptPromise;
+
+  ytScriptPromise = new Promise<void>((resolve) => {
+    const prevReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      prevReady?.();
+      resolve();
+    };
+
+    const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
+    if (!existing) {
+      const script = document.createElement('script');
+      script.src = 'https://www.youtube.com/iframe_api';
+      script.async = true;
+      document.head.appendChild(script);
+    }
+  });
+
+  return ytScriptPromise;
+}
+
+function interleaveTracks(lists: Track[][], maxItems = 24): Track[] {
+  const result: Track[] = [];
+  const seen = new Set<string>();
+  const maxLen = Math.max(0, ...lists.map((l) => l.length));
+
+  for (let i = 0; i < maxLen && result.length < maxItems; i++) {
+    for (const list of lists) {
+      const item = list[i];
+      if (!item || seen.has(item.id)) continue;
+      seen.add(item.id);
+      result.push(item);
+      if (result.length >= maxItems) break;
+    }
+  }
+  return result;
+}
 
 export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const initialPrefs = useMemo(() => loadPlayerPrefs(), []);
 
-  // Views & UI Panels
+  // Views & UI Panels — always launch on Home with Right Panel CLOSED
   const [activeView, setActiveView] = useState<NavView>('home');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
-  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('lyrics');
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>(null);
   const [isZenMode, setIsZenMode] = useState(false);
   const [isCreatePlaylistOpen, setIsCreatePlaylistOpen] = useState(false);
 
@@ -140,15 +260,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [playlists, setPlaylists] = useState<Playlist[]>(() => loadPlaylistsFromStorage());
   const [likedIds, setLikedIds] = useState<string[]>(() => loadLikedIdsFromStorage());
 
-  // Home Trending Feeds
+  // Home & Explore Dynamic Curated Feeds
+  const [featuredTracks, setFeaturedTracks] = useState<Track[]>([]);
   const [indonesiaTrending, setIndonesiaTrending] = useState<Track[]>([]);
-  const [globalTrending, setGlobalTrending] = useState<Track[]>([]);
+  const [viralTracks, setViralTracks] = useState<Track[]>([]);
+  const [indieRnbTracks, setIndieRnbTracks] = useState<Track[]>([]);
   const [isTrendingLoading, setIsTrendingLoading] = useState(true);
-  const [trendingError, setTrendingError] = useState<string | null>(null);
-  const [trendingSource, setTrendingSource] = useState<'piped' | 'itunes-fallback' | 'emergency'>('piped');
 
   // Audio & Queue State
   const [currentTrackId, setCurrentTrackId] = useState<string | null>(null);
+  const [activeEngine, setActiveEngine] = useState<PlaybackEngine>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -159,36 +280,74 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [loopMode, setLoopMode] = useState<LoopMode>(initialPrefs.loopMode);
   const [originalQueueIds, setOriginalQueueIds] = useState<string[]>([]);
   const [queueIds, setQueueIds] = useState<string[]>([]);
-  const [ambientColor, setAmbientColor] = useState<AmbientColor>({
-    r: 16,
-    g: 185,
-    b: 129,
-    hex: '#10B981',
+  const [ambientPalette, setAmbientPalette] = useState<AmbientPalette>({
+    primary: { r: 148, g: 163, b: 184, hex: '#94A3B8' },
+    secondary: { r: 99, g: 102, b: 241, hex: '#6366F1' },
   });
+  const [sleepTimerRemaining, setSleepTimerRemaining] = useState<number | null>(null);
+  const [sleepTimerMode, setSleepTimerMode] = useState<'off' | 'countdown' | 'end_of_track'>('off');
+  const [isAmbientVideoEnabled, setIsAmbientVideoEnabled] = useState<boolean>(() =>
+    loadAmbientVideoPref()
+  );
+  const [crossfadeDuration, setCrossfadeDurationState] = useState<number>(
+    initialPrefs.crossfadeDuration
+  );
+  const [activeYtDeck, setActiveYtDeck] = useState<0 | 1>(0);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Refs for stable async callbacks & HTML5 <audio>
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const streamCacheRef = useRef<Map<string, { url: string; cachedAt: number }>>(new Map());
+  // Dual Audio Engine Pools (2 YouTube IFrame Decks + 2 HTML5 <audio> Elements for true overlapping cross-fade)
+  const html5PoolRef = useRef<[HTMLAudioElement | null, HTMLAudioElement | null]>([null, null]);
+  const activeHtml5SlotRef = useRef<0 | 1>(0);
+  const html5FadeTimersRef = useRef<[number | null, number | null]>([null, null]);
+  const html5FadeGainRef = useRef<[number, number]>([1, 1]);
+
+  const ytDeckWrapperRefs = useRef<[HTMLDivElement | null, HTMLDivElement | null]>([null, null]);
+  const ytPlayersRef = useRef<[YTPlayerInstance | null, YTPlayerInstance | null]>([null, null]);
+  const ytReadyRef = useRef<[boolean, boolean]>([false, false]);
+  const activeYtDeckRef = useRef<0 | 1>(0);
+  const pendingYtVideoIdsRef = useRef<[string | null, string | null]>([null, null]);
+  const ytFadeTimersRef = useRef<[number | null, number | null]>([null, null]);
+  const ytFadeGainRef = useRef<[number, number]>([1, 1]);
+  const ytFadingInPendingRef = useRef<[number | null, number | null]>([null, null]);
+
+  const activeEngineRef = useRef<PlaybackEngine>(null);
+  const lastManualSeekAtRef = useRef<number>(0);
+  const sleepTimerEndAtRef = useRef<number | null>(null);
+  const sleepTimerModeRef = useRef<'off' | 'countdown' | 'end_of_track'>('off');
+  sleepTimerModeRef.current = sleepTimerMode;
+
   const playRequestSeqRef = useRef(0);
-  const streamAbortRef = useRef<AbortController | null>(null);
+  const crossfadeTriggeredSeqRef = useRef<number>(-1);
+  const fallbackAttemptIndexRef = useRef<number>(0);
+  const ytAltTriedRef = useRef<Record<string, boolean>>({});
+  const consecutiveErrorSkipsRef = useRef(0);
   const lyricsAbortRef = useRef<AbortController | null>(null);
+
   const trackRegistryRef = useRef(trackRegistry);
   trackRegistryRef.current = trackRegistry;
-
   const queueIdsRef = useRef(queueIds);
   queueIdsRef.current = queueIds;
   const currentTrackIdRef = useRef(currentTrackId);
   currentTrackIdRef.current = currentTrackId;
   const loopModeRef = useRef(loopMode);
   loopModeRef.current = loopMode;
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted;
+  const currentTimeRef = useRef(currentTime);
+  currentTimeRef.current = currentTime;
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
+  const crossfadeDurationRef = useRef(crossfadeDuration);
+  crossfadeDurationRef.current = crossfadeDuration;
 
   const pushToast = useCallback((text: string, tone: ToastMessage['tone'] = 'info') => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     setToasts((prev) => [...prev.slice(-2), { id, text, tone }]);
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3200);
+    }, 2800);
   }, []);
 
   const registerTracks = useCallback((tracks: Track[]) => {
@@ -203,11 +362,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           changed = true;
         } else if (
           t.sourceType === 'local' ||
+          (!existing.videoId && t.videoId) ||
+          (!existing.audioUrl && t.audioUrl) ||
           (existing.lyrics.length === 0 && t.lyrics.length > 0)
         ) {
           next[t.id] = {
             ...existing,
             ...t,
+            videoId: t.videoId || existing.videoId,
             lyrics: t.lyrics.length > 0 ? t.lyrics : existing.lyrics,
             lyricsStatus:
               t.lyrics.length > 0 ? 'loaded' : existing.lyricsStatus || t.lyricsStatus,
@@ -219,7 +381,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
   }, []);
 
-  // Persist playlists, likes, saved tracks, and prefs
   useEffect(() => {
     savePlaylistsToStorage(playlists);
   }, [playlists]);
@@ -229,10 +390,46 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [likedIds]);
 
   useEffect(() => {
-    savePlayerPrefs({ volume, isMuted, isShuffled, loopMode });
-  }, [volume, isMuted, isShuffled, loopMode]);
+    savePlayerPrefs({ volume, isMuted, isShuffled, loopMode, crossfadeDuration });
+  }, [volume, isMuted, isShuffled, loopMode, crossfadeDuration]);
 
-  // Snapshot any online tracks referenced by playlists or likedIds so they survive reload
+  useEffect(() => {
+    saveAmbientVideoPref(isAmbientVideoEnabled);
+  }, [isAmbientVideoEnabled]);
+
+  const toggleAmbientVideo = useCallback(() => {
+    setIsAmbientVideoEnabled((prev) => {
+      const next = !prev;
+      pushToast(next ? 'Ambient Video aktif' : 'Ambient Video dimatikan', 'info');
+      return next;
+    });
+  }, [pushToast]);
+
+  const setCrossfadeDuration = useCallback(
+    (seconds: number) => {
+      const clamped = Math.max(0, Math.min(12, Math.round(seconds)));
+      setCrossfadeDurationState(clamped);
+      pushToast(
+        clamped > 0 ? `Cross-fade diatur: ${clamped} detik` : 'Cross-fade dimatikan',
+        'info'
+      );
+    },
+    [pushToast]
+  );
+
+  const cycleCrossfadeDuration = useCallback(() => {
+    const steps = [0, 3, 5, 8];
+    setCrossfadeDurationState((prev) => {
+      const idx = steps.indexOf(prev);
+      const next = steps[(idx + 1) % steps.length];
+      pushToast(
+        next > 0 ? `Cross-fade diatur: ${next} detik` : 'Cross-fade dimatikan',
+        'info'
+      );
+      return next;
+    });
+  }, [pushToast]);
+
   useEffect(() => {
     const referencedIds = new Set<string>(likedIds);
     for (const pl of playlists) {
@@ -248,7 +445,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     saveSavedTracksToStorage(toPersist);
   }, [playlists, likedIds, trackRegistry]);
 
-  // Load local tracks from IndexedDB on startup
   useEffect(() => {
     let active = true;
     getAllLocalTracksFromDb().then((tracks) => {
@@ -261,55 +457,65 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [registerTracks]);
 
-  // Fetch initial Trending feeds from Piped API on mount
   const refreshTrending = useCallback(async () => {
     setIsTrendingLoading(true);
-    setTrendingError(null);
     const controller = new AbortController();
 
     try {
-      const [idRes, globalRes] = await Promise.allSettled([
-        searchOnlineTracks('Top Hits Indonesia 2026', controller.signal),
-        searchOnlineTracks('Global Top Songs', controller.signal),
-      ]);
+      let { indonesia, global, viral, indieRnb } = await fetchCuratedFeeds(controller.signal).catch(
+        () => ({ indonesia: [], global: [], viral: [], indieRnb: [] })
+      );
 
-      let idTracks: Track[] = [];
-      let glTracks: Track[] = [];
-      let sourceUsed: 'piped' | 'itunes-fallback' | 'emergency' = 'piped';
+      if (indonesia.length === 0 || global.length === 0) {
+        const [indoFallback, globalFallback, viralFallback, indieFallback] = await Promise.allSettled([
+          indonesia.length
+            ? Promise.resolve({ tracks: indonesia })
+            : searchOnlineTracks('Tulus Hindia Bernadya Nadhif Basalamah', controller.signal, 20),
+          global.length
+            ? Promise.resolve({ tracks: global })
+            : searchOnlineTracks('The Weeknd Coldplay Bruno Mars Billie Eilish', controller.signal, 20),
+          viral.length
+            ? Promise.resolve({ tracks: viral })
+            : searchOnlineTracks('viral tiktok hits 2026', controller.signal, 20),
+          indieRnb.length
+            ? Promise.resolve({ tracks: indieRnb })
+            : searchOnlineTracks('Hindia Reality Club Daniel Caesar SZA', controller.signal, 20),
+        ]);
 
-      if (idRes.status === 'fulfilled') {
-        idTracks = idRes.value.tracks.slice(0, 14);
-        if (idRes.value.source === 'itunes-fallback') sourceUsed = 'itunes-fallback';
-      }
-      if (globalRes.status === 'fulfilled') {
-        glTracks = globalRes.value.tracks.slice(0, 14);
-        if (globalRes.value.source === 'itunes-fallback' && sourceUsed !== 'piped') {
-          sourceUsed = 'itunes-fallback';
+        if (indonesia.length === 0 && indoFallback.status === 'fulfilled') {
+          indonesia = indoFallback.value.tracks;
+        }
+        if (global.length === 0 && globalFallback.status === 'fulfilled') {
+          global = globalFallback.value.tracks;
+        }
+        if (viral.length === 0 && viralFallback.status === 'fulfilled') {
+          viral = viralFallback.value.tracks;
+        }
+        if (indieRnb.length === 0 && indieFallback.status === 'fulfilled') {
+          indieRnb = indieFallback.value.tracks;
         }
       }
 
-      if (idTracks.length === 0 && glTracks.length === 0) {
-        idTracks = EMERGENCY_FALLBACK_TRACKS;
-        glTracks = [...EMERGENCY_FALLBACK_TRACKS].reverse();
-        sourceUsed = 'emergency';
-        setTrendingError('Server streaming sedang sibuk. Menampilkan koleksi studio sementara.');
+      if (indonesia.length === 0 && global.length === 0) {
+        indonesia = EMERGENCY_FALLBACK_TRACKS;
+        global = [...EMERGENCY_FALLBACK_TRACKS].reverse();
       }
 
-      const combined = [...idTracks, ...glTracks];
+      const combined = interleaveTracks([indonesia, global, viral, indieRnb], 48);
       registerTracks(combined);
-      setIndonesiaTrending(idTracks);
-      setGlobalTrending(glTracks);
-      setTrendingSource(sourceUsed);
+      setIndonesiaTrending(indonesia);
+      setFeaturedTracks(global.length ? global : indonesia);
+      setViralTracks(viral.length ? viral : global);
+      setIndieRnbTracks(indieRnb.length ? indieRnb : indonesia);
 
-      // Prime initial queue without autoplaying
       setOriginalQueueIds((prev) => (prev.length === 0 ? combined.map((t) => t.id) : prev));
       setQueueIds((prev) => (prev.length === 0 ? combined.map((t) => t.id) : prev));
     } catch {
       registerTracks(EMERGENCY_FALLBACK_TRACKS);
-      setIndonesiaTrending(EMERGENCY_FALLBACK_TRACKS);
-      setGlobalTrending([...EMERGENCY_FALLBACK_TRACKS].reverse());
-      setTrendingSource('emergency');
-      setTrendingError('Tidak dapat terhubung ke Piped API. Menggunakan mode studio offline.');
+      setFeaturedTracks(EMERGENCY_FALLBACK_TRACKS);
+      setIndonesiaTrending([...EMERGENCY_FALLBACK_TRACKS].reverse());
+      setViralTracks(EMERGENCY_FALLBACK_TRACKS);
+      setIndieRnbTracks(EMERGENCY_FALLBACK_TRACKS);
     } finally {
       setIsTrendingLoading(false);
     }
@@ -324,21 +530,26 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [currentTrackId, trackRegistry]
   );
 
-  // Extract ambient color whenever active track cover changes
   useEffect(() => {
     if (!currentTrack) return;
     let cancelled = false;
-    extractCoverAmbientColor(currentTrack.coverUrl, currentTrack.id).then((color) => {
+    extractCoverAmbientPalette(currentTrack.coverUrl, currentTrack.id).then((palette) => {
       if (cancelled) return;
-      setAmbientColor(color);
-      document.documentElement.style.setProperty('--ambient-rgb', `${color.r}, ${color.g}, ${color.b}`);
+      setAmbientPalette(palette);
+      document.documentElement.style.setProperty(
+        '--ambient-rgb',
+        `${palette.primary.r}, ${palette.primary.g}, ${palette.primary.b}`
+      );
+      document.documentElement.style.setProperty(
+        '--ambient-secondary-rgb',
+        `${palette.secondary.r}, ${palette.secondary.g}, ${palette.secondary.b}`
+      );
     });
     return () => {
       cancelled = true;
     };
   }, [currentTrack?.id, currentTrack?.coverUrl]);
 
-  // Automatically fetch LRCLIB synced lyrics when a track becomes active
   useEffect(() => {
     if (!currentTrack) return;
     if (currentTrack.lyricsStatus === 'loaded' || currentTrack.lyrics.length > 0) return;
@@ -383,35 +594,254 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => controller.abort();
   }, [currentTrack?.id]);
 
-  // Core audio loader & player
-  const startPlaybackForTrack = useCallback(
-    async (track: Track, forceRefreshStream = false) => {
-      const audio = audioRef.current;
+  const clearYtFade = useCallback((deckIdx: 0 | 1) => {
+    const timer = ytFadeTimersRef.current[deckIdx];
+    if (timer !== null) {
+      window.clearInterval(timer);
+      ytFadeTimersRef.current[deckIdx] = null;
+    }
+    ytFadingInPendingRef.current[deckIdx] = null;
+  }, []);
+
+  const clearHtml5Fade = useCallback((slotIdx: 0 | 1) => {
+    const timer = html5FadeTimersRef.current[slotIdx];
+    if (timer !== null) {
+      window.clearInterval(timer);
+      html5FadeTimersRef.current[slotIdx] = null;
+    }
+  }, []);
+
+  const applyYtDeckGain = useCallback((deckIdx: 0 | 1, gain01: number) => {
+    ytFadeGainRef.current[deckIdx] = Math.max(0, Math.min(1, gain01));
+    const player = ytPlayersRef.current[deckIdx];
+    if (!player || !ytReadyRef.current[deckIdx]) return;
+    try {
+      const baseVol = isMutedRef.current ? 0 : volumeRef.current;
+      const effective = Math.max(0, Math.min(1, ytFadeGainRef.current[deckIdx])) * baseVol;
+      player.setVolume(Math.round(effective * 100));
+      if (effective <= 0.001) {
+        player.mute();
+      } else {
+        player.unMute();
+      }
+    } catch {
+      // Ignore if YT player not ready
+    }
+  }, []);
+
+  const applyHtml5SlotGain = useCallback((slotIdx: 0 | 1, gain01: number) => {
+    html5FadeGainRef.current[slotIdx] = Math.max(0, Math.min(1, gain01));
+    const audio = html5PoolRef.current[slotIdx];
+    if (!audio) return;
+    const baseVol = isMutedRef.current ? 0 : volumeRef.current;
+    audio.volume = Math.max(0, Math.min(1, html5FadeGainRef.current[slotIdx])) * baseVol;
+  }, []);
+
+  const fadeOutYtDeck = useCallback(
+    (deckIdx: 0 | 1, durationMs: number) => {
+      clearYtFade(deckIdx);
+      const player = ytPlayersRef.current[deckIdx];
+      if (!player || !ytReadyRef.current[deckIdx]) return;
+
+      if (durationMs <= 60) {
+        try {
+          player.pauseVideo();
+        } catch {
+          // Ignore
+        }
+        applyYtDeckGain(deckIdx, 1);
+        return;
+      }
+
+      const startGain = ytFadeGainRef.current[deckIdx] || 1;
+      const startedAt = Date.now();
+      ytFadeTimersRef.current[deckIdx] = window.setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        const progress = Math.min(1, elapsed / durationMs);
+        const gain = startGain * Math.cos(progress * Math.PI * 0.5);
+        applyYtDeckGain(deckIdx, gain);
+
+        if (progress >= 1) {
+          clearYtFade(deckIdx);
+          try {
+            ytPlayersRef.current[deckIdx]?.pauseVideo();
+          } catch {
+            // Ignore
+          }
+          applyYtDeckGain(deckIdx, 1);
+        }
+      }, 50);
+    },
+    [applyYtDeckGain, clearYtFade]
+  );
+
+  const fadeInYtDeck = useCallback(
+    (deckIdx: 0 | 1, durationMs: number) => {
+      clearYtFade(deckIdx);
+      if (durationMs <= 60) {
+        applyYtDeckGain(deckIdx, 1);
+        return;
+      }
+
+      applyYtDeckGain(deckIdx, 0.03);
+      const startedAt = Date.now();
+      ytFadeTimersRef.current[deckIdx] = window.setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        const progress = Math.min(1, elapsed / durationMs);
+        const gain = Math.sin(progress * Math.PI * 0.5);
+        applyYtDeckGain(deckIdx, gain);
+
+        if (progress >= 1) {
+          clearYtFade(deckIdx);
+          applyYtDeckGain(deckIdx, 1);
+        }
+      }, 50);
+    },
+    [applyYtDeckGain, clearYtFade]
+  );
+
+  const fadeOutHtml5Slot = useCallback(
+    (slotIdx: 0 | 1, durationMs: number) => {
+      clearHtml5Fade(slotIdx);
+      const audio = html5PoolRef.current[slotIdx];
       if (!audio) return;
 
+      if (durationMs <= 60 || audio.paused) {
+        audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+        applyHtml5SlotGain(slotIdx, 1);
+        return;
+      }
+
+      const startGain = html5FadeGainRef.current[slotIdx] || 1;
+      const startedAt = Date.now();
+      html5FadeTimersRef.current[slotIdx] = window.setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        const progress = Math.min(1, elapsed / durationMs);
+        const gain = startGain * Math.cos(progress * Math.PI * 0.5);
+        applyHtml5SlotGain(slotIdx, gain);
+
+        if (progress >= 1) {
+          clearHtml5Fade(slotIdx);
+          const target = html5PoolRef.current[slotIdx];
+          if (target) {
+            target.pause();
+            target.removeAttribute('src');
+            target.load();
+          }
+          applyHtml5SlotGain(slotIdx, 1);
+        }
+      }, 50);
+    },
+    [applyHtml5SlotGain, clearHtml5Fade]
+  );
+
+  const fadeInHtml5Slot = useCallback(
+    (slotIdx: 0 | 1, durationMs: number) => {
+      clearHtml5Fade(slotIdx);
+      if (durationMs <= 60) {
+        applyHtml5SlotGain(slotIdx, 1);
+        return;
+      }
+
+      applyHtml5SlotGain(slotIdx, 0.03);
+      const startedAt = Date.now();
+      html5FadeTimersRef.current[slotIdx] = window.setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        const progress = Math.min(1, elapsed / durationMs);
+        const gain = Math.sin(progress * Math.PI * 0.5);
+        applyHtml5SlotGain(slotIdx, gain);
+
+        if (progress >= 1) {
+          clearHtml5Fade(slotIdx);
+          applyHtml5SlotGain(slotIdx, 1);
+        }
+      }, 50);
+    },
+    [applyHtml5SlotGain, clearHtml5Fade]
+  );
+
+  const advanceQueueOnEndOrSkipRef = useRef<() => void>(() => {});
+  const startPlaybackRef = useRef<
+    (track: Track, isAutoRecovery?: boolean, transitionMode?: 'direct' | 'skip' | 'auto') => Promise<void>
+  >(async () => {});
+
+  const startPlaybackForTrack = useCallback(
+    async (
+      track: Track,
+      isAutoRecovery = false,
+      transitionMode: 'direct' | 'skip' | 'auto' = 'direct'
+    ) => {
       const reqSeq = ++playRequestSeqRef.current;
-      streamAbortRef.current?.abort();
+      crossfadeTriggeredSeqRef.current = -1;
+      fallbackAttemptIndexRef.current = 0;
+      if (!isAutoRecovery) {
+        consecutiveErrorSkipsRef.current = 0;
+      }
+
+      const prevEngine = activeEngineRef.current;
+      const prevYtDeck = activeYtDeckRef.current;
+      const prevHtml5Slot = activeHtml5SlotRef.current;
+
+      const cfSeconds = crossfadeDurationRef.current;
+      const shouldCrossfade = !isAutoRecovery && cfSeconds > 0 && isPlayingRef.current;
+      const fadeOutMs = !shouldCrossfade
+        ? 0
+        : transitionMode === 'auto'
+          ? cfSeconds * 1000
+          : Math.min(cfSeconds * 1000, 1600);
+      const fadeInMs = !shouldCrossfade
+        ? 0
+        : transitionMode === 'auto'
+          ? cfSeconds * 1000
+          : Math.min(cfSeconds * 1000, 1400);
 
       setCurrentTrackId(track.id);
       setCurrentTime(0);
       setDuration(track.duration || 0);
       setIsBuffering(true);
 
-      // Direct playback for local IndexedDB ObjectURLs, preview URLs, or emergency fallback tracks
-      if (track.sourceType !== 'online' || (!track.videoId && track.audioUrl)) {
-        if (!track.audioUrl) {
+      // Local MP3s play directly via HTML5 <audio> pool
+      if (track.sourceType === 'local') {
+        const nextSlot: 0 | 1 =
+          prevEngine === 'html5' ? (prevHtml5Slot === 0 ? 1 : 0) : prevHtml5Slot;
+        const incomingAudio = html5PoolRef.current[nextSlot];
+
+        // Ensure no lingering 3rd track keeps playing if user skips rapidly
+        const otherYtDeck: 0 | 1 = prevYtDeck === 0 ? 1 : 0;
+        fadeOutYtDeck(otherYtDeck, 0);
+        if (prevEngine === 'youtube') {
+          fadeOutYtDeck(prevYtDeck, fadeOutMs);
+        } else {
+          fadeOutYtDeck(prevYtDeck, 0);
+        }
+        if (prevEngine === 'html5' && prevHtml5Slot !== nextSlot) {
+          fadeOutHtml5Slot(prevHtml5Slot, fadeOutMs);
+        }
+
+        activeEngineRef.current = 'html5';
+        setActiveEngine('html5');
+        activeHtml5SlotRef.current = nextSlot;
+        pendingYtVideoIdsRef.current = [null, null];
+
+        clearHtml5Fade(nextSlot);
+        if (!incomingAudio || !track.audioUrl) {
           setIsBuffering(false);
           setIsPlaying(false);
-          pushToast('Sumber audio trek ini tidak tersedia.', 'error');
           return;
         }
+
         try {
-          audio.src = track.audioUrl;
-          audio.load();
-          await audio.play();
+          applyHtml5SlotGain(nextSlot, fadeInMs > 0 ? 0.03 : 1);
+          incomingAudio.src = track.audioUrl;
+          incomingAudio.load();
+          await incomingAudio.play();
           if (playRequestSeqRef.current === reqSeq) {
             setIsPlaying(true);
             setIsBuffering(false);
+            consecutiveErrorSkipsRef.current = 0;
+            fadeInHtml5Slot(nextSlot, fadeInMs);
           }
         } catch {
           if (playRequestSeqRef.current === reqSeq) {
@@ -422,100 +852,197 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return;
       }
 
-      // Full-track Piped stream resolution via /streams/:videoId
-      const videoId = track.videoId!;
-      const cached = !forceRefreshStream ? streamCacheRef.current.get(videoId) : undefined;
-      if (cached && Date.now() - cached.cachedAt < STREAM_CACHE_TTL_MS) {
-        try {
-          audio.src = cached.url;
-          audio.load();
-          await audio.play();
-          if (playRequestSeqRef.current === reqSeq) {
-            setIsPlaying(true);
-            setIsBuffering(false);
+      // Online tracks: resolve YouTube videoId first (keep outgoing track fading smoothly if needed)
+      let videoId = track.videoId;
+      if (!videoId) {
+        videoId = (await resolveYouTubeVideoId(track.artist, track.title)) || undefined;
+        if (playRequestSeqRef.current !== reqSeq) return;
+
+        if (videoId) {
+          setTrackRegistry((prev) => {
+            const existing = prev[track.id];
+            return {
+              ...prev,
+              [track.id]: { ...(existing || track), videoId },
+            };
+          });
+        }
+      }
+
+      if (videoId) {
+        const candidateDeck: 0 | 1 =
+          prevEngine === 'youtube' ? (prevYtDeck === 0 ? 1 : 0) : prevYtDeck;
+        const nextDeck: 0 | 1 =
+          ytReadyRef.current[candidateDeck] || !ytReadyRef.current[prevYtDeck]
+            ? candidateDeck
+            : prevYtDeck;
+
+        // Silence older HTML5 slot or fade out active HTML5 slot when cross-fading across engines
+        const otherHtml5Slot: 0 | 1 = prevHtml5Slot === 0 ? 1 : 0;
+        fadeOutHtml5Slot(otherHtml5Slot, 0);
+        if (prevEngine === 'html5') {
+          fadeOutHtml5Slot(prevHtml5Slot, fadeOutMs);
+        } else {
+          fadeOutHtml5Slot(prevHtml5Slot, 0);
+        }
+
+        if (prevEngine === 'youtube' && prevYtDeck !== nextDeck) {
+          fadeOutYtDeck(prevYtDeck, fadeOutMs);
+        }
+
+        activeEngineRef.current = 'youtube';
+        setActiveEngine('youtube');
+        activeYtDeckRef.current = nextDeck;
+        setActiveYtDeck(nextDeck);
+
+        clearYtFade(nextDeck);
+
+        if (ytReadyRef.current[nextDeck] && ytPlayersRef.current[nextDeck]) {
+          pendingYtVideoIdsRef.current[nextDeck] = null;
+          if (fadeInMs > 0) {
+            applyYtDeckGain(nextDeck, 0.03);
+            ytFadingInPendingRef.current[nextDeck] = fadeInMs;
+          } else {
+            applyYtDeckGain(nextDeck, 1);
+            ytFadingInPendingRef.current[nextDeck] = null;
           }
-          return;
-        } catch {
-          streamCacheRef.current.delete(videoId);
+          ytPlayersRef.current[nextDeck]!.loadVideoById(videoId);
+        } else {
+          pendingYtVideoIdsRef.current[nextDeck] = videoId;
+          ytFadingInPendingRef.current[nextDeck] = fadeInMs > 0 ? fadeInMs : null;
+          loadYouTubeIframeApi();
         }
-      }
-
-      const controller = new AbortController();
-      streamAbortRef.current = controller;
-
-      try {
-        const streamUrl = await resolvePipedStreamUrl(videoId, controller.signal);
-        if (playRequestSeqRef.current !== reqSeq || controller.signal.aborted) return;
-
-        streamCacheRef.current.set(videoId, { url: streamUrl, cachedAt: Date.now() });
-        audio.src = streamUrl;
-        audio.load();
-        await audio.play();
-
-        if (playRequestSeqRef.current === reqSeq) {
-          setIsPlaying(true);
-          setIsBuffering(false);
-        }
-      } catch (err) {
-        if ((err as Error)?.name === 'AbortError' || playRequestSeqRef.current !== reqSeq) return;
-        setIsPlaying(false);
-        setIsBuffering(false);
-        pushToast(`Gagal memutar "${track.title}". Mencoba server lain...`, 'error');
-      }
-    },
-    [pushToast]
-  );
-
-  // Initialize single HTML5 <audio> element once
-  useEffect(() => {
-    const audio = new Audio();
-    audio.preload = 'auto';
-    audio.volume = isMuted ? 0 : volume;
-    audioRef.current = audio;
-
-    const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime || 0);
-    };
-
-    const handleLoadedMetadata = () => {
-      if (Number.isFinite(audio.duration) && audio.duration > 0) {
-        setDuration(audio.duration);
-      }
-    };
-
-    const handlePlaying = () => {
-      setIsPlaying(true);
-      setIsBuffering(false);
-    };
-
-    const handlePause = () => {
-      setIsPlaying(false);
-    };
-
-    const handleWaiting = () => {
-      setIsBuffering(true);
-    };
-
-    const handleCanPlay = () => {
-      setIsBuffering(false);
-    };
-
-    const handleEnded = () => {
-      const mode = loopModeRef.current;
-      if (mode === 'one') {
-        audio.currentTime = 0;
-        audio.play().catch(() => {});
         return;
       }
 
+      // Fallback HTML5 <audio> only if YouTube search returned no playable videoId
+      const nextSlot: 0 | 1 =
+        prevEngine === 'html5' ? (prevHtml5Slot === 0 ? 1 : 0) : prevHtml5Slot;
+      const incomingAudio = html5PoolRef.current[nextSlot];
+
+      const otherYtDeck: 0 | 1 = prevYtDeck === 0 ? 1 : 0;
+      fadeOutYtDeck(otherYtDeck, 0);
+      if (prevEngine === 'youtube') {
+        fadeOutYtDeck(prevYtDeck, fadeOutMs);
+      } else {
+        fadeOutYtDeck(prevYtDeck, 0);
+      }
+      if (prevEngine === 'html5' && prevHtml5Slot !== nextSlot) {
+        fadeOutHtml5Slot(prevHtml5Slot, fadeOutMs);
+      }
+
+      activeEngineRef.current = 'html5';
+      setActiveEngine('html5');
+      activeHtml5SlotRef.current = nextSlot;
+      pendingYtVideoIdsRef.current = [null, null];
+
+      const srcUrl = track.audioUrl || track.fallbackAudioUrls?.[0];
+      clearHtml5Fade(nextSlot);
+      if (!incomingAudio || !srcUrl) {
+        setIsBuffering(false);
+        setIsPlaying(false);
+        return;
+      }
+
+      try {
+        applyHtml5SlotGain(nextSlot, fadeInMs > 0 ? 0.03 : 1);
+        incomingAudio.src = srcUrl;
+        incomingAudio.load();
+        await incomingAudio.play();
+        if (playRequestSeqRef.current === reqSeq) {
+          setIsPlaying(true);
+          setIsBuffering(false);
+          consecutiveErrorSkipsRef.current = 0;
+          fadeInHtml5Slot(nextSlot, fadeInMs);
+        }
+      } catch {
+        if (playRequestSeqRef.current === reqSeq) {
+          setIsPlaying(false);
+          setIsBuffering(false);
+        }
+      }
+    },
+    [
+      applyHtml5SlotGain,
+      applyYtDeckGain,
+      clearHtml5Fade,
+      clearYtFade,
+      fadeInHtml5Slot,
+      fadeOutHtml5Slot,
+      fadeOutYtDeck,
+    ]
+  );
+
+  startPlaybackRef.current = startPlaybackForTrack;
+
+  const triggerEndOfTrackCrossfade = useCallback(() => {
+    if (crossfadeTriggeredSeqRef.current === playRequestSeqRef.current) return;
+    if (sleepTimerModeRef.current === 'end_of_track') return;
+    if (loopModeRef.current === 'one') return;
+
+    const q = queueIdsRef.current;
+    const curId = currentTrackIdRef.current;
+    if (!curId || q.length === 0) return;
+
+    const idx = q.indexOf(curId);
+    let nextId: string | undefined;
+    if (idx !== -1 && idx + 1 < q.length) {
+      nextId = q[idx + 1];
+    } else if (loopModeRef.current === 'all' && q.length > 0) {
+      nextId = q[0];
+    }
+
+    if (!nextId || nextId === curId) return;
+    const nextTrack = trackRegistryRef.current[nextId];
+    if (!nextTrack) return;
+
+    crossfadeTriggeredSeqRef.current = playRequestSeqRef.current;
+    startPlaybackRef.current(nextTrack, false, 'auto');
+  }, []);
+
+  useEffect(() => {
+    advanceQueueOnEndOrSkipRef.current = () => {
+      if (sleepTimerModeRef.current === 'end_of_track') {
+        sleepTimerModeRef.current = 'off';
+        sleepTimerEndAtRef.current = null;
+        setSleepTimerMode('off');
+        setSleepTimerRemaining(null);
+        setIsPlaying(false);
+        setIsBuffering(false);
+        pushToast('Sleep timer selesai — pemutaran dijeda', 'info');
+        return;
+      }
+
+      const mode = loopModeRef.current;
       const q = queueIdsRef.current;
       const curId = currentTrackIdRef.current;
-      const idx = curId ? q.indexOf(curId) : -1;
 
+      if (mode === 'one' && curId) {
+        if (activeEngineRef.current === 'youtube') {
+          const deck = ytPlayersRef.current[activeYtDeckRef.current];
+          if (deck) {
+            lastManualSeekAtRef.current = Date.now();
+            setCurrentTime(0);
+            deck.seekTo(0, true);
+            deck.playVideo();
+            return;
+          }
+        }
+        if (activeEngineRef.current === 'html5') {
+          const audio = html5PoolRef.current[activeHtml5SlotRef.current];
+          if (audio) {
+            audio.currentTime = 0;
+            audio.play().catch(() => {});
+            return;
+          }
+        }
+      }
+
+      const idx = curId ? q.indexOf(curId) : -1;
       if (idx !== -1 && idx + 1 < q.length) {
         const nextTrack = trackRegistryRef.current[q[idx + 1]];
         if (nextTrack) {
-          startPlaybackForTrack(nextTrack);
+          startPlaybackRef.current(nextTrack, false, 'auto');
           return;
         }
       }
@@ -523,67 +1050,411 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (mode === 'all' && q.length > 0) {
         const firstTrack = trackRegistryRef.current[q[0]];
         if (firstTrack) {
-          startPlaybackForTrack(firstTrack);
+          startPlaybackRef.current(firstTrack, false, 'auto');
           return;
         }
       }
 
       setIsPlaying(false);
-    };
-
-    const handleError = () => {
-      const curId = currentTrackIdRef.current;
-      const curTrack = curId ? trackRegistryRef.current[curId] : null;
-      if (curTrack?.sourceType === 'online' && curTrack.videoId && streamCacheRef.current.has(curTrack.videoId)) {
-        streamCacheRef.current.delete(curTrack.videoId);
-        startPlaybackForTrack(curTrack, true);
-        return;
-      }
-      setIsPlaying(false);
       setIsBuffering(false);
     };
+  }, [pushToast]);
 
-    audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
-    audio.addEventListener('playing', handlePlaying);
-    audio.addEventListener('pause', handlePause);
-    audio.addEventListener('waiting', handleWaiting);
-    audio.addEventListener('canplay', handleCanPlay);
-    audio.addEventListener('ended', handleEnded);
-    audio.addEventListener('error', handleError);
+  // Initialize Dual YouTube IFrame Players (Deck 0 & Deck 1) ONCE using isolated slot elements
+  useEffect(() => {
+    let mounted = true;
+
+    loadYouTubeIframeApi().then(() => {
+      const YT = window.YT;
+      if (!mounted || !YT?.Player) return;
+
+      ([0, 1] as const).forEach((deckIdx) => {
+        const host = ytDeckWrapperRefs.current[deckIdx];
+        if (!host) return;
+
+        const slot = document.createElement('div');
+        host.innerHTML = '';
+        host.appendChild(slot);
+
+        const player = new YT.Player(slot, {
+          width: '100%',
+          height: '100%',
+          playerVars: {
+            autoplay: 1,
+            controls: 0,
+            disablekb: 1,
+            enablejsapi: 1,
+            fs: 0,
+            modestbranding: 1,
+            rel: 0,
+            playsinline: 1,
+            origin: window.location.origin,
+          },
+          events: {
+            onReady: (event) => {
+              if (!mounted) return;
+              ytPlayersRef.current[deckIdx] = event.target;
+              ytReadyRef.current[deckIdx] = true;
+
+              const pendingVid = pendingYtVideoIdsRef.current[deckIdx];
+              if (
+                activeEngineRef.current === 'youtube' &&
+                activeYtDeckRef.current === deckIdx &&
+                pendingVid
+              ) {
+                pendingYtVideoIdsRef.current[deckIdx] = null;
+                const pendingFadeMs = ytFadingInPendingRef.current[deckIdx];
+                applyYtDeckGain(deckIdx, pendingFadeMs ? 0.03 : 1);
+                event.target.loadVideoById(pendingVid);
+              } else {
+                applyYtDeckGain(deckIdx, 1);
+              }
+            },
+            onStateChange: (event) => {
+              if (
+                !mounted ||
+                activeEngineRef.current !== 'youtube' ||
+                activeYtDeckRef.current !== deckIdx
+              ) {
+                return;
+              }
+              const YTState = window.YT?.PlayerState;
+              if (!YTState) return;
+
+              if (event.data === YTState.BUFFERING) {
+                setIsBuffering(true);
+              } else if (event.data === YTState.PLAYING) {
+                setIsPlaying(true);
+                setIsBuffering(false);
+                consecutiveErrorSkipsRef.current = 0;
+
+                const pendingFadeMs = ytFadingInPendingRef.current[deckIdx];
+                if (pendingFadeMs && pendingFadeMs > 0) {
+                  ytFadingInPendingRef.current[deckIdx] = null;
+                  fadeInYtDeck(deckIdx, pendingFadeMs);
+                }
+
+                try {
+                  const dur = event.target.getDuration?.();
+                  const cur = event.target.getCurrentTime?.();
+                  if (Number.isFinite(dur) && dur > 0) {
+                    setDuration(dur);
+                  }
+                  if (
+                    Number.isFinite(cur) &&
+                    cur >= 0 &&
+                    Date.now() - lastManualSeekAtRef.current > 350
+                  ) {
+                    setCurrentTime(cur);
+                  }
+                } catch {
+                  // Ignore
+                }
+              } else if (event.data === YTState.PAUSED) {
+                setIsPlaying(false);
+                setIsBuffering(false);
+              } else if (event.data === YTState.ENDED) {
+                advanceQueueOnEndOrSkipRef.current();
+              }
+            },
+            onError: async () => {
+              if (
+                !mounted ||
+                activeEngineRef.current !== 'youtube' ||
+                activeYtDeckRef.current !== deckIdx
+              ) {
+                return;
+              }
+              const curId = currentTrackIdRef.current;
+              const curTrack = curId ? trackRegistryRef.current[curId] : null;
+
+              // Silent recovery 1: search an alternate embeddable audio/lyric video for the same song
+              if (curTrack && !ytAltTriedRef.current[curTrack.id]) {
+                ytAltTriedRef.current[curTrack.id] = true;
+                try {
+                  const alts = await searchYouTubeTracks(
+                    `${curTrack.artist} ${curTrack.title} lyrics audio`,
+                    undefined,
+                    6
+                  );
+                  const alt = alts.find((a) => a.videoId && a.videoId !== curTrack.videoId);
+                  if (alt?.videoId && currentTrackIdRef.current === curTrack.id) {
+                    setTrackRegistry((prev) => ({
+                      ...prev,
+                      [curTrack.id]: { ...curTrack, videoId: alt.videoId },
+                    }));
+                    ytPlayersRef.current[deckIdx]?.loadVideoById(alt.videoId);
+                    return;
+                  }
+                } catch {
+                  // Continue to fallback
+                }
+              }
+
+              // Silent recovery 2: fall back to direct HTML5 audioUrl if available
+              if (curTrack?.audioUrl) {
+                const slot = activeHtml5SlotRef.current;
+                activeEngineRef.current = 'html5';
+                setActiveEngine('html5');
+                const audio = html5PoolRef.current[slot];
+                if (audio) {
+                  applyHtml5SlotGain(slot, 1);
+                  audio.src = curTrack.audioUrl;
+                  audio.load();
+                  audio.play().catch(() => {
+                    setIsPlaying(false);
+                    setIsBuffering(false);
+                  });
+                  return;
+                }
+              }
+
+              // Silent recovery 3: advance cleanly to next track (bounded)
+              if (consecutiveErrorSkipsRef.current < 3) {
+                consecutiveErrorSkipsRef.current += 1;
+                const q = queueIdsRef.current;
+                const idx = curId ? q.indexOf(curId) : -1;
+                if (idx !== -1 && idx + 1 < q.length) {
+                  const nextTrack = trackRegistryRef.current[q[idx + 1]];
+                  if (nextTrack) {
+                    startPlaybackRef.current(nextTrack, true, 'direct');
+                    return;
+                  }
+                }
+              }
+
+              setIsPlaying(false);
+              setIsBuffering(false);
+            },
+          },
+        });
+
+        ytPlayersRef.current[deckIdx] = player;
+      });
+    });
 
     return () => {
-      audio.pause();
-      audio.src = '';
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      audio.removeEventListener('playing', handlePlaying);
-      audio.removeEventListener('pause', handlePause);
-      audio.removeEventListener('waiting', handleWaiting);
-      audio.removeEventListener('canplay', handleCanPlay);
-      audio.removeEventListener('ended', handleEnded);
-      audio.removeEventListener('error', handleError);
+      mounted = false;
+      ([0, 1] as const).forEach((deckIdx) => {
+        clearYtFade(deckIdx);
+        try {
+          ytPlayersRef.current[deckIdx]?.destroy?.();
+        } catch {
+          // Ignore cleanup errors
+        }
+        ytPlayersRef.current[deckIdx] = null;
+        ytReadyRef.current[deckIdx] = false;
+      });
     };
-  }, [startPlaybackForTrack]);
+  }, [applyHtml5SlotGain, applyYtDeckGain, clearYtFade, fadeInYtDeck]);
 
-  // Sync audio volume & mute
+  // Active 200ms polling loop for active YouTube deck currentTime, duration, synced lyrics & auto cross-fade
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = isMuted ? 0 : volume;
-    }
-  }, [volume, isMuted]);
+    if (activeEngine !== 'youtube' || (!isPlaying && !isBuffering)) return;
+
+    const timer = window.setInterval(() => {
+      const deckIdx = activeYtDeckRef.current;
+      const player = ytPlayersRef.current[deckIdx];
+      if (!player || !ytReadyRef.current[deckIdx] || activeEngineRef.current !== 'youtube') return;
+
+      try {
+        const state = player.getPlayerState?.();
+        const YTState = window.YT?.PlayerState;
+        if (YTState && state === YTState.PLAYING) {
+          setIsPlaying(true);
+          setIsBuffering(false);
+
+          const pendingFadeMs = ytFadingInPendingRef.current[deckIdx];
+          if (pendingFadeMs && pendingFadeMs > 0) {
+            ytFadingInPendingRef.current[deckIdx] = null;
+            fadeInYtDeck(deckIdx, pendingFadeMs);
+          }
+        }
+
+        const dur = player.getDuration?.();
+        if (Number.isFinite(dur) && dur > 0) {
+          setDuration(dur);
+        }
+
+        const cur = player.getCurrentTime?.();
+        if (
+          Number.isFinite(cur) &&
+          cur >= 0 &&
+          Date.now() - lastManualSeekAtRef.current > 350
+        ) {
+          setCurrentTime(cur);
+
+          const cf = crossfadeDurationRef.current;
+          if (
+            cf > 0 &&
+            YTState &&
+            state === YTState.PLAYING &&
+            Number.isFinite(dur) &&
+            dur >= cf * 2.2 &&
+            dur - cur <= cf &&
+            dur - cur > 0.25
+          ) {
+            triggerEndOfTrackCrossfade();
+          }
+        }
+      } catch {
+        // Ignore polling errors
+      }
+    }, 200);
+
+    return () => window.clearInterval(timer);
+  }, [activeEngine, isPlaying, isBuffering, fadeInYtDeck, triggerEndOfTrackCrossfade]);
+
+  // Initialize Dual HTML5 <audio> Pool (Slot 0 & Slot 1) for overlapping MP3/stream cross-fades
+  useEffect(() => {
+    const cleanups: Array<() => void> = [];
+
+    ([0, 1] as const).forEach((slotIdx) => {
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.volume = isMutedRef.current ? 0 : volumeRef.current;
+      html5PoolRef.current[slotIdx] = audio;
+
+      const isActiveSlot = () =>
+        activeEngineRef.current === 'html5' && activeHtml5SlotRef.current === slotIdx;
+
+      const handleTimeUpdate = () => {
+        if (!isActiveSlot()) return;
+        const cur = audio.currentTime || 0;
+        const dur = audio.duration;
+        setCurrentTime(cur);
+
+        const cf = crossfadeDurationRef.current;
+        if (
+          cf > 0 &&
+          !audio.paused &&
+          Number.isFinite(dur) &&
+          dur >= cf * 2.2 &&
+          dur - cur <= cf &&
+          dur - cur > 0.25
+        ) {
+          triggerEndOfTrackCrossfade();
+        }
+      };
+
+      const handleLoadedMetadata = () => {
+        if (!isActiveSlot()) return;
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
+          setDuration(audio.duration);
+        }
+      };
+
+      const handlePlaying = () => {
+        if (!isActiveSlot()) return;
+        setIsPlaying(true);
+        setIsBuffering(false);
+      };
+
+      const handlePause = () => {
+        if (!isActiveSlot()) return;
+        setIsPlaying(false);
+      };
+
+      const handleWaiting = () => {
+        if (!isActiveSlot()) return;
+        setIsBuffering(true);
+      };
+
+      const handleCanPlay = () => {
+        if (!isActiveSlot()) return;
+        setIsBuffering(false);
+      };
+
+      const handleEnded = () => {
+        if (!isActiveSlot()) return;
+        advanceQueueOnEndOrSkipRef.current();
+      };
+
+      const handleError = () => {
+        if (!isActiveSlot()) return;
+        const curId = currentTrackIdRef.current;
+        const curTrack = curId ? trackRegistryRef.current[curId] : null;
+        const fallbacks = curTrack?.fallbackAudioUrls || [];
+        const nextIdx = fallbackAttemptIndexRef.current;
+        if (fallbacks[nextIdx]) {
+          fallbackAttemptIndexRef.current = nextIdx + 1;
+          audio.src = fallbacks[nextIdx];
+          audio.load();
+          audio.play().catch(() => {
+            setIsPlaying(false);
+            setIsBuffering(false);
+          });
+          return;
+        }
+        setIsPlaying(false);
+        setIsBuffering(false);
+      };
+
+      audio.addEventListener('timeupdate', handleTimeUpdate);
+      audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.addEventListener('playing', handlePlaying);
+      audio.addEventListener('pause', handlePause);
+      audio.addEventListener('waiting', handleWaiting);
+      audio.addEventListener('canplay', handleCanPlay);
+      audio.addEventListener('ended', handleEnded);
+      audio.addEventListener('error', handleError);
+
+      cleanups.push(() => {
+        clearHtml5Fade(slotIdx);
+        audio.pause();
+        audio.src = '';
+        audio.removeEventListener('timeupdate', handleTimeUpdate);
+        audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        audio.removeEventListener('playing', handlePlaying);
+        audio.removeEventListener('pause', handlePause);
+        audio.removeEventListener('waiting', handleWaiting);
+        audio.removeEventListener('canplay', handleCanPlay);
+        audio.removeEventListener('ended', handleEnded);
+        audio.removeEventListener('error', handleError);
+        html5PoolRef.current[slotIdx] = null;
+      });
+    });
+
+    return () => {
+      cleanups.forEach((fn) => fn());
+    };
+  }, [clearHtml5Fade, triggerEndOfTrackCrossfade]);
+
+  // Sync live volume & mute across both decks and pools (scaling any ongoing cross-fade cleanly)
+  useEffect(() => {
+    ([0, 1] as const).forEach((idx) => {
+      applyHtml5SlotGain(idx, html5FadeGainRef.current[idx]);
+      applyYtDeckGain(idx, ytFadeGainRef.current[idx]);
+    });
+  }, [volume, isMuted, applyHtml5SlotGain, applyYtDeckGain]);
 
   const playTrack = useCallback(
     (track: Track, contextTracks?: Track[]) => {
       registerTracks(contextTracks ? [track, ...contextTracks] : [track]);
 
-      if (track.id === currentTrackId && audioRef.current?.src && !contextTracks) {
-        if (isPlaying) {
-          audioRef.current.pause();
-        } else {
-          audioRef.current.play().catch(() => {});
+      if (track.id === currentTrackId && !contextTracks) {
+        const deckIdx = activeYtDeckRef.current;
+        const ytPlayer = ytPlayersRef.current[deckIdx];
+        if (activeEngineRef.current === 'youtube' && ytReadyRef.current[deckIdx] && ytPlayer) {
+          if (isPlaying) {
+            ytPlayer.pauseVideo();
+          } else {
+            setIsBuffering(true);
+            ytPlayer.playVideo();
+          }
+          return;
         }
-        return;
+        const slot = activeHtml5SlotRef.current;
+        const audio = html5PoolRef.current[slot];
+        if (activeEngineRef.current === 'html5' && audio?.src) {
+          if (isPlaying) {
+            audio.pause();
+          } else {
+            setIsBuffering(true);
+            audio.play().catch(() => startPlaybackForTrack(track));
+          }
+          return;
+        }
       }
 
       if (contextTracks && contextTracks.length > 0) {
@@ -602,72 +1473,132 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setQueueIds((prev) => [track.id, ...prev]);
       }
 
-      startPlaybackForTrack(track);
+      startPlaybackForTrack(track, false, 'skip');
     },
     [currentTrackId, isPlaying, isShuffled, queueIds, registerTracks, startPlaybackForTrack]
   );
 
   const togglePlayPause = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
     if (!currentTrack) {
       const firstId = queueIds[0];
-      const first = firstId ? trackRegistry[firstId] : indonesiaTrending[0] || localTracks[0];
+      const first =
+        (firstId ? trackRegistry[firstId] : null) ||
+        indonesiaTrending[0] ||
+        featuredTracks[0] ||
+        localTracks[0];
       if (first) {
-        playTrack(first, indonesiaTrending.length ? indonesiaTrending : localTracks);
+        playTrack(
+          first,
+          indonesiaTrending.length
+            ? indonesiaTrending
+            : featuredTracks.length
+              ? featuredTracks
+              : localTracks
+        );
       }
       return;
     }
 
-    if (isPlaying) {
-      audio.pause();
-    } else if (audio.src) {
-      audio.play().catch(() => {
-        startPlaybackForTrack(currentTrack, true);
-      });
-    } else {
-      startPlaybackForTrack(currentTrack);
+    const deckIdx = activeYtDeckRef.current;
+    const ytPlayer = ytPlayersRef.current[deckIdx];
+    if (activeEngineRef.current === 'youtube' && ytReadyRef.current[deckIdx] && ytPlayer) {
+      if (isPlaying) {
+        ytPlayer.pauseVideo();
+      } else {
+        setIsBuffering(true);
+        ytPlayer.playVideo();
+      }
+      return;
     }
-  }, [currentTrack, indonesiaTrending, isPlaying, localTracks, playTrack, queueIds, startPlaybackForTrack, trackRegistry]);
+
+    const audio = html5PoolRef.current[activeHtml5SlotRef.current];
+    if (activeEngineRef.current === 'html5' && audio) {
+      if (isPlaying) {
+        audio.pause();
+      } else if (audio.src) {
+        setIsBuffering(true);
+        audio.play().catch(() => startPlaybackForTrack(currentTrack));
+      } else {
+        startPlaybackForTrack(currentTrack);
+      }
+      return;
+    }
+
+    startPlaybackForTrack(currentTrack);
+  }, [
+    currentTrack,
+    featuredTracks,
+    indonesiaTrending,
+    isPlaying,
+    localTracks,
+    playTrack,
+    queueIds,
+    startPlaybackForTrack,
+    trackRegistry,
+  ]);
 
   const playNext = useCallback(() => {
     if (queueIds.length === 0) return;
     const idx = currentTrackId ? queueIds.indexOf(currentTrackId) : -1;
     const nextIdx = idx + 1 < queueIds.length ? idx + 1 : 0;
     const nextTrack = trackRegistry[queueIds[nextIdx]];
-    if (nextTrack) startPlaybackForTrack(nextTrack);
+    if (nextTrack) startPlaybackForTrack(nextTrack, false, 'skip');
   }, [currentTrackId, queueIds, startPlaybackForTrack, trackRegistry]);
 
+  const seekTo = useCallback(
+    (seconds: number) => {
+      const deckIdx = activeYtDeckRef.current;
+      const ytPlayer = ytPlayersRef.current[deckIdx];
+      if (activeEngineRef.current === 'youtube' && ytReadyRef.current[deckIdx] && ytPlayer) {
+        const ytDur = ytPlayer.getDuration?.() || duration || 0;
+        const maxVal = ytDur > 0 ? ytDur : seconds;
+        const clamped = Math.max(0, Math.min(seconds, maxVal));
+        lastManualSeekAtRef.current = Date.now();
+        setCurrentTime(clamped);
+        ytPlayer.seekTo(clamped, true);
+        return;
+      }
+
+      const audio = html5PoolRef.current[activeHtml5SlotRef.current];
+      if (!audio) return;
+      const clamped = Math.max(0, Math.min(seconds, audio.duration || duration || 0));
+      audio.currentTime = clamped;
+      setCurrentTime(clamped);
+    },
+    [duration]
+  );
+
   const playPrev = useCallback(() => {
-    const audio = audioRef.current;
-    if (audio && audio.currentTime > 3) {
-      audio.currentTime = 0;
-      setCurrentTime(0);
+    const deckIdx = activeYtDeckRef.current;
+    const ytPlayer = ytPlayersRef.current[deckIdx];
+    const audio = html5PoolRef.current[activeHtml5SlotRef.current];
+    const elapsed =
+      activeEngineRef.current === 'youtube' && ytReadyRef.current[deckIdx] && ytPlayer
+        ? ytPlayer.getCurrentTime?.() ?? currentTimeRef.current
+        : audio?.currentTime ?? currentTimeRef.current;
+
+    if (elapsed > 3) {
+      seekTo(0);
       return;
     }
+
     if (queueIds.length === 0) return;
     const idx = currentTrackId ? queueIds.indexOf(currentTrackId) : 0;
     const prevIdx = idx - 1 >= 0 ? idx - 1 : queueIds.length - 1;
     const prevTrack = trackRegistry[queueIds[prevIdx]];
-    if (prevTrack) startPlaybackForTrack(prevTrack);
-  }, [currentTrackId, queueIds, startPlaybackForTrack, trackRegistry]);
+    if (prevTrack) startPlaybackForTrack(prevTrack, false, 'skip');
+  }, [currentTrackId, queueIds, seekTo, startPlaybackForTrack, trackRegistry]);
 
-  const seekTo = useCallback((seconds: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const clamped = Math.max(0, Math.min(seconds, audio.duration || duration || 0));
-    audio.currentTime = clamped;
-    setCurrentTime(clamped);
-  }, [duration]);
-
-  const setVolume = useCallback((vol: number) => {
-    const clamped = Math.max(0, Math.min(1, vol));
-    setVolumeState(clamped);
-    if (clamped > 0 && isMuted) {
-      setIsMuted(false);
-    }
-  }, [isMuted]);
+  const setVolume = useCallback(
+    (vol: number) => {
+      const clamped = Math.max(0, Math.min(1, vol));
+      setVolumeState(clamped);
+      if (clamped > 0 && isMuted) {
+        setIsMuted(false);
+      }
+    },
+    [isMuted]
+  );
 
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => !prev);
@@ -682,10 +1613,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const others = cur ? base.filter((id) => id !== cur) : base;
         const shuffled = cur ? [cur, ...fisherYatesShuffle(others)] : fisherYatesShuffle(others);
         setQueueIds(shuffled);
-        pushToast('True Shuffle (Fisher-Yates) aktif', 'success');
+        pushToast('True Shuffle aktif', 'success');
       } else {
         setQueueIds([...base]);
-        pushToast('Urutan antrean dikembalikan normal', 'info');
+        pushToast('Urutan antrean normal', 'info');
       }
       return next;
     });
@@ -700,6 +1631,83 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return next;
     });
   }, [pushToast]);
+
+  const pauseActivePlayback = useCallback(() => {
+    ([0, 1] as const).forEach((idx) => {
+      clearYtFade(idx);
+      clearHtml5Fade(idx);
+      if (ytReadyRef.current[idx] && ytPlayersRef.current[idx]) {
+        try {
+          ytPlayersRef.current[idx]!.pauseVideo();
+        } catch {
+          // Ignore if YT player unavailable
+        }
+      }
+      const audio = html5PoolRef.current[idx];
+      if (audio) {
+        try {
+          audio.pause();
+        } catch {
+          // Ignore
+        }
+      }
+    });
+    setIsPlaying(false);
+    setIsBuffering(false);
+  }, [clearHtml5Fade, clearYtFade]);
+
+  const setSleepTimerMinutes = useCallback(
+    (minutes: number) => {
+      const safeMinutes = Math.max(1, Math.min(240, Math.round(minutes)));
+      const totalSeconds = safeMinutes * 60;
+      sleepTimerEndAtRef.current = Date.now() + totalSeconds * 1000;
+      sleepTimerModeRef.current = 'countdown';
+      setSleepTimerMode('countdown');
+      setSleepTimerRemaining(totalSeconds);
+      pushToast(`Sleep timer diatur: ${safeMinutes} menit`, 'success');
+    },
+    [pushToast]
+  );
+
+  const setSleepTimerEndOfTrack = useCallback(() => {
+    sleepTimerEndAtRef.current = null;
+    sleepTimerModeRef.current = 'end_of_track';
+    setSleepTimerMode('end_of_track');
+    setSleepTimerRemaining(null);
+    pushToast('Pemutaran akan dijeda saat lagu ini selesai', 'success');
+  }, [pushToast]);
+
+  const cancelSleepTimer = useCallback(() => {
+    sleepTimerEndAtRef.current = null;
+    sleepTimerModeRef.current = 'off';
+    setSleepTimerMode('off');
+    setSleepTimerRemaining(null);
+    pushToast('Sleep timer dibatalkan', 'info');
+  }, [pushToast]);
+
+  useEffect(() => {
+    if (sleepTimerMode !== 'countdown') return;
+
+    const tick = () => {
+      const endAt = sleepTimerEndAtRef.current;
+      if (!endAt) return;
+      const remaining = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+      setSleepTimerRemaining(remaining);
+
+      if (remaining <= 0) {
+        sleepTimerEndAtRef.current = null;
+        sleepTimerModeRef.current = 'off';
+        setSleepTimerMode('off');
+        setSleepTimerRemaining(null);
+        pauseActivePlayback();
+        pushToast('Sleep timer selesai — pemutaran dijeda', 'info');
+      }
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 500);
+    return () => window.clearInterval(timer);
+  }, [sleepTimerMode, pauseActivePlayback, pushToast]);
 
   const addToQueue = useCallback(
     (track: Track, playNextPosition = false) => {
@@ -722,16 +1730,30 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [currentTrackId, pushToast, registerTracks]
   );
 
-  const removeFromQueue = useCallback((index: number) => {
-    setQueueIds((prev) => {
-      if (index < 0 || index >= prev.length) return prev;
-      const targetId = prev[index];
-      if (targetId === currentTrackId) return prev;
-      const copy = [...prev];
-      copy.splice(index, 1);
-      return copy;
-    });
-  }, [currentTrackId]);
+  const removeFromQueue = useCallback(
+    (index: number) => {
+      const currentList = queueIdsRef.current;
+      if (index < 0 || index >= currentList.length) return;
+      const targetId = currentList[index];
+      const nextList = [...currentList];
+      nextList.splice(index, 1);
+
+      setQueueIds(nextList);
+
+      if (targetId === currentTrackIdRef.current) {
+        if (nextList.length > 0) {
+          const replacement = trackRegistryRef.current[nextList[Math.min(index, nextList.length - 1)]];
+          if (replacement) {
+            startPlaybackRef.current(replacement, false, 'skip');
+            return;
+          }
+        }
+        pauseActivePlayback();
+        setCurrentTrackId(null);
+      }
+    },
+    [pauseActivePlayback]
+  );
 
   const reorderQueue = useCallback((fromIndex: number, toIndex: number) => {
     setQueueIds((prev) => {
@@ -752,8 +1774,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const clearUpcomingQueue = useCallback(() => {
-    setQueueIds((prev) => (currentTrackId && prev.includes(currentTrackId) ? [currentTrackId] : []));
-    pushToast('Antrean berikutnya dibersihkan', 'info');
+    setQueueIds((prev) =>
+      isPlayingRef.current && currentTrackId && prev.includes(currentTrackId) ? [currentTrackId] : []
+    );
+    pushToast('Antrean dibersihkan', 'info');
   }, [currentTrackId, pushToast]);
 
   const openPlaylist = useCallback((playlistId: string) => {
@@ -840,7 +1864,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setLikedIds((prev) => {
         const exists = prev.includes(track.id);
         if (exists) {
-          pushToast(`Dihapus dari Liked Songs`, 'info');
+          pushToast('Dihapus dari Liked Songs', 'info');
           return prev.filter((id) => id !== track.id);
         }
         pushToast(`"${track.title}" disimpan ke Liked Songs`, 'success');
@@ -858,7 +1882,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         (f) => f.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(f.name)
       );
       if (fileArray.length === 0) {
-        pushToast('Pilih file audio MP3, WAV, OGG, atau M4A yang valid.', 'error');
+        pushToast('Pilih file audio MP3, WAV, OGG, atau M4A yang valid.', 'info');
         return;
       }
 
@@ -899,12 +1923,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         );
       }
 
-      pushToast(
-        `${addedTracks.length} lagu lokal disimpan permanen di browser`,
-        'success'
-      );
+      pushToast(`${addedTracks.length} lagu lokal disimpan permanen`, 'success');
 
-      // Auto-start first uploaded track if nothing is playing
       if (!currentTrackId && addedTracks[0]) {
         playTrack(addedTracks[0], addedTracks);
       }
@@ -943,6 +1963,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const value: PlayerContextValue = {
     activeView,
     setActiveView,
+    searchQuery,
+    setSearchQuery,
     selectedPlaylistId,
     openPlaylist,
     rightPanelTab,
@@ -966,11 +1988,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     isLiked,
     uploadLocalFiles,
     deleteLocalTrack,
+    featuredTracks,
     indonesiaTrending,
-    globalTrending,
+    viralTracks,
+    indieRnbTracks,
     isTrendingLoading,
-    trendingError,
-    trendingSource,
     refreshTrending,
     currentTrack,
     isPlaying,
@@ -983,7 +2005,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     loopMode,
     queueIds,
     queueTracks,
-    ambientColor,
+    ambientColor: ambientPalette.primary,
+    ambientPalette,
     playTrack,
     togglePlayPause,
     playNext,
@@ -997,11 +2020,63 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     removeFromQueue,
     reorderQueue,
     clearUpcomingQueue,
+    sleepTimerRemaining,
+    sleepTimerMode,
+    setSleepTimerMinutes,
+    setSleepTimerEndOfTrack,
+    cancelSleepTimer,
+    activeEngine,
+    isAmbientVideoEnabled,
+    setIsAmbientVideoEnabled,
+    toggleAmbientVideo,
+    crossfadeDuration,
+    setCrossfadeDuration,
+    cycleCrossfadeDuration,
     toasts,
     pushToast,
   };
 
-  return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
+  const showAmbientVideo =
+    isAmbientVideoEnabled &&
+    isPlaying &&
+    activeEngine === 'youtube' &&
+    currentTrack?.sourceType !== 'local';
+
+  return (
+    <PlayerContext.Provider value={value}>
+      {/* Layer 0: Dual-Deck Ambient Music Video Backdrop behind Glass UI */}
+      <div
+        aria-hidden="true"
+        className="fixed inset-0 z-0 pointer-events-none overflow-hidden bg-[#0B0B0D]"
+      >
+        <div
+          className={`absolute inset-0 transition-opacity duration-1000 ease-out ${
+            showAmbientVideo ? 'opacity-25' : 'opacity-0'
+          }`}
+        >
+          {([0, 1] as const).map((deckIdx) => (
+            <div
+              key={deckIdx}
+              ref={(el) => {
+                ytDeckWrapperRefs.current[deckIdx] = el;
+              }}
+              className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full w-[177.78vh] h-[56.25vw] scale-125 blur-2xl [&>iframe]:w-full [&>iframe]:h-full [&>iframe]:pointer-events-none transition-opacity duration-1000 ${
+                activeYtDeck === deckIdx ? 'opacity-100 z-10' : 'opacity-0 z-0'
+              }`}
+            />
+          ))}
+        </div>
+        <div
+          className={`absolute inset-0 transition-opacity duration-1000 ${
+            showAmbientVideo
+              ? 'bg-gradient-to-b from-[#0B0B0D]/25 via-[#0B0B0D]/45 to-[#0B0B0D]/80'
+              : 'bg-gradient-to-b from-[#0B0B0D]/60 via-[#0B0B0D]/80 to-[#0B0B0D]'
+          }`}
+        />
+      </div>
+      {children}
+    </PlayerContext.Provider>
+  );
 };
 
 export function usePlayer(): PlayerContextValue {

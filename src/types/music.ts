@@ -14,6 +14,7 @@ export interface Track {
   duration: number; // in seconds
   coverUrl: string;
   audioUrl?: string;
+  fallbackAudioUrls?: string[];
   sourceType: TrackSourceType;
   isPreview?: boolean;
   lyrics: LyricLine[];
@@ -32,7 +33,7 @@ export interface Playlist {
 
 export type LoopMode = 'off' | 'all' | 'one';
 
-export type NavView = 'home' | 'explore' | 'liked' | 'playlist';
+export type NavView = 'home' | 'explore' | 'liked' | 'playlist' | 'library' | 'local';
 
 export type RightPanelTab = 'queue' | 'lyrics' | null;
 
@@ -41,6 +42,11 @@ export interface AmbientColor {
   g: number;
   b: number;
   hex: string;
+}
+
+export interface AmbientPalette {
+  primary: AmbientColor;
+  secondary: AmbientColor;
 }
 
 export interface MoodCategory {

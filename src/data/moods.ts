@@ -1,58 +1,54 @@
 import { MoodCategory, Track } from '../types/music';
 
-export const DEFAULT_COVER_URL = '/src/assets/images/purebeat_default_cover_1795653178048.jpg';
+export const DEFAULT_COVER_URL = '/src/assets/images/nocty_default_cover_1795654303378.jpg';
 
 export const MOOD_CATEGORIES: MoodCategory[] = [
   {
     id: 'fokus',
     label: 'Fokus',
-    subtitle: 'Instrumental tenang & lo-fi presisi',
-    query: 'lofi beats chill focus instrumental music',
-    coverUrl: '/src/assets/images/mood_fokus_1795653177714.jpg',
-    accentHex: '#10B981',
+    subtitle: 'Instrumental presisi & lo-fi tenang',
+    query: 'lofi chill beats focus music',
+    coverUrl: '/src/assets/images/nocty_mood_fokus_1795654304103.jpg',
+    accentHex: '#4F46E5',
   },
   {
     id: 'santai',
     label: 'Santai',
-    subtitle: 'Akustik hangat & indie Indonesia',
-    query: 'indie indonesia akustik santai tulus hindia',
-    coverUrl: '/src/assets/images/mood_santai_1795653177933.jpg',
-    accentHex: '#84CC16',
+    subtitle: 'Akustik hangat & melodi senja',
+    query: 'Tulus Nadhif Basalamah akustik santai',
+    coverUrl: '/src/assets/images/nocty_mood_santai_1795654303982.jpg',
+    accentHex: '#3B82F6',
   },
   {
     id: 'larut-malam',
     label: 'Larut Malam',
-    subtitle: 'R&B atmosferik & balada malam',
-    query: 'late night rnb chill synthwave slow',
-    coverUrl: '/src/assets/images/mood_larut_malam_1795653179087.jpg',
-    accentHex: '#A3E635',
+    subtitle: 'Atmosferik malam & synth lembut',
+    query: 'Hindia Pamungkas lagu malam santai',
+    coverUrl: '/src/assets/images/nocty_mood_larut_1795654305260.jpg',
+    accentHex: '#8B5CF6',
   },
   {
     id: 'energi',
     label: 'Energi',
-    subtitle: 'Upbeat pop & ritme bertenaga',
-    query: 'upbeat pop dance hits workout energy',
-    coverUrl: '/src/assets/images/mood_energi_1795653179611.jpg',
-    accentHex: '#22C55E',
+    subtitle: 'Ritme upbeat & penuh energi',
+    query: 'The Weeknd Bruno Mars upbeat hits audio',
+    coverUrl: '/src/assets/images/nocty_mood_energi_1795654305195.jpg',
+    accentHex: '#06B6D4',
   },
 ];
 
-/**
- * Curated offline-resilient royalty-free fallback tracks used only when all
- * external Piped/iTunes network requests fail in a restricted environment.
- */
 export const EMERGENCY_FALLBACK_TRACKS: Track[] = [
   {
     id: 'fallback-1',
-    title: 'Neon Horizon',
+    title: 'Aurora Horizon',
     artist: 'Studio Nocty',
-    album: 'Ambient Sessions',
+    album: 'Obsidian Sessions',
     duration: 372,
-    coverUrl: '/src/assets/images/mood_fokus_1795653177714.jpg',
+    coverUrl: '/src/assets/images/nocty_mood_fokus_1795654304103.jpg',
     audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
     sourceType: 'online',
     lyrics: [
-      { time: 2, text: 'Cahaya hijau berpendar di ruang sunyi' },
+      { time: 2, text: 'Cahaya indigo berpendar di ruang sunyi' },
       { time: 9, text: 'Menyusuri nada dalam frekuensi tenang' },
       { time: 17, text: 'Setiap ketukan menjaga fokus tetap utuh' },
       { time: 26, text: 'Mengalir pelan menuju cakrawala malam' },
@@ -62,15 +58,15 @@ export const EMERGENCY_FALLBACK_TRACKS: Track[] = [
   },
   {
     id: 'fallback-2',
-    title: 'Emerald Mist',
+    title: 'Electric Mist',
     artist: 'Kinetik Harmoni',
     album: 'Nocturne Wave',
     duration: 425,
-    coverUrl: '/src/assets/images/mood_santai_1795653177933.jpg',
+    coverUrl: '/src/assets/images/nocty_mood_santai_1795654303982.jpg',
     audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
     sourceType: 'online',
     lyrics: [
-      { time: 3, text: 'Kabut lembut turun di penghujung senja' },
+      { time: 3, text: 'Kabut biru turun di penghujung senja' },
       { time: 11, text: 'Berhenti sejenak dari riuhnya kota' },
       { time: 20, text: 'Biarkan melodi membawa tenang ke dalam diri' },
     ],
@@ -83,12 +79,12 @@ export const EMERGENCY_FALLBACK_TRACKS: Track[] = [
     artist: 'Luna Synth',
     album: 'Larut Malam Vol. 1',
     duration: 344,
-    coverUrl: '/src/assets/images/mood_larut_malam_1795653179087.jpg',
+    coverUrl: '/src/assets/images/nocty_mood_larut_1795654305260.jpg',
     audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
     sourceType: 'online',
     lyrics: [
       { time: 2, text: 'Detik jarum jam melambat saat tengah malam' },
-      { time: 10, text: 'Lampu jalan memantul di kaca jendela' },
+      { time: 10, text: 'Lampu kota memantul di kaca jendela' },
       { time: 19, text: 'Irama hangat menemani perjalanan pulang' },
     ],
     lyricsStatus: 'loaded',
@@ -96,11 +92,11 @@ export const EMERGENCY_FALLBACK_TRACKS: Track[] = [
   },
   {
     id: 'fallback-4',
-    title: 'Chartreuse Drive',
+    title: 'Cyan Velocity',
     artist: 'Veloce Collective',
     album: 'High Voltage',
     duration: 302,
-    coverUrl: '/src/assets/images/mood_energi_1795653179611.jpg',
+    coverUrl: '/src/assets/images/nocty_mood_energi_1795654305195.jpg',
     audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
     sourceType: 'online',
     lyrics: [
