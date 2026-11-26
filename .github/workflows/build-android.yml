@@ -29,10 +29,13 @@ jobs:
           npm install --legacy-peer-deps
           npm run build
 
-      - name: Setup Capacitor Android
+      - name: Setup Capacitor Android & Generate App Icons
         run: |
-          npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android
+          npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
           npx cap add android || npx cap sync android
+          if [ -f "assets/icon-only.png" ] || [ -f "assets/icon.png" ]; then
+            npx @capacitor/assets generate --android --iconBackgroundColor '#0B0B0D' --splashBackgroundColor '#0B0B0D'
+          fi
 
       - name: Inject Android Permissions & Fix Kotlin Duplicate Classes
         run: |
