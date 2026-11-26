@@ -34,10 +34,23 @@ jobs:
           npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android
           npx cap add android || npx cap sync android
 
-      - name: Inject Android Permissions
+      - name: Inject Android Permissions & Fix Kotlin Duplicate Classes
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           sed -i 's|<application|<uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n    <uses-permission android:name="android.permission.BLUETOOTH" />\n    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />\n    <application|' "$MANIFEST"
+          cat << 'EOF' >> android/app/build.gradle
+
+          dependencies {
+              constraints {
+                  implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22") {
+                      because("kotlin-stdlib-jdk7 is now a part of kotlin-stdlib")
+                  }
+                  implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22") {
+                      because("kotlin-stdlib-jdk8 is now a part of kotlin-stdlib")
+                  }
+              }
+          }
+          EOF
           npx cap sync android
 
       - name: Build Debug APK
