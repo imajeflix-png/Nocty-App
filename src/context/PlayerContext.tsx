@@ -41,8 +41,9 @@ import {
 } from '../services/storageDb';
 import {
   fetchCuratedFeeds,
+  isPreviewAudioUrl,
+  resolveFullStream,
   resolveYouTubeMusicVideoId,
-  resolveYouTubeVideoId,
   searchOnlineTracks,
   searchYouTubeTracks,
 } from '../services/musicApi';
@@ -189,6 +190,7 @@ interface PlayerContextValue {
   loopMode: LoopMode;
   queueIds: string[];
   queueTracks: Track[];
+  currentIndex: number;
   currentMood: TrackMoodInfo | null;
   ambientColor: AmbientColor;
   ambientPalette: AmbientPalette;
@@ -357,6 +359,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [loopMode, setLoopMode] = useState<LoopMode>(initialPrefs.loopMode);
   const [originalQueueIds, setOriginalQueueIds] = useState<string[]>([]);
   const [queueIds, setQueueIds] = useState<string[]>([]);
+  const [currentIndex, setCurrentIndex] = useState<number>(-1);
   const [extractedPalette, setExtractedPalette] =
     useState<AmbientPalette>(DEFAULT_AMBIENT_PALETTE);
   const [isDynamicThemeSync, setIsDynamicThemeSync] = useState<boolean>(() => {
@@ -433,6 +436,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const consecutiveErrorSkipsRef = useRef(0);
   const lyricsAbortRef = useRef<AbortController | null>(null);
   const moodMixSeqRef = useRef(0);
+  const isTransitioningRef = useRef(false);
+  const transitionLockTimerRef = useRef<number | null>(null);
 
   const trackRegistryRef = useRef(trackRegistry);
   trackRegistryRef.current = trackRegistry;
@@ -440,6 +445,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   originalQueueIdsRef.current = originalQueueIds;
   const queueIdsRef = useRef(queueIds);
   queueIdsRef.current = queueIds;
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
   const currentTrackIdRef = useRef(currentTrackId);
   currentTrackIdRef.current = currentTrackId;
   const isShuffledRef = useRef(isShuffled);
@@ -477,6 +484,44 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 2800);
+  }, []);
+
+  const acquireTransitionLock = useCallback((durationMs = 1500): boolean => {
+    if (isTransitioningRef.current) return false;
+    isTransitioningRef.current = true;
+    if (transitionLockTimerRef.current !== null) {
+      window.clearTimeout(transitionLockTimerRef.current);
+    }
+    transitionLockTimerRef.current = window.setTimeout(() => {
+      isTransitioningRef.current = false;
+      transitionLockTimerRef.current = null;
+    }, durationMs);
+    return true;
+  }, []);
+
+  const releaseTransitionLock = useCallback(() => {
+    isTransitioningRef.current = false;
+    if (transitionLockTimerRef.current !== null) {
+      window.clearTimeout(transitionLockTimerRef.current);
+      transitionLockTimerRef.current = null;
+    }
+  }, []);
+
+  const getResolvedCurrentIndex = useCallback((queue: string[], curId: string | null): number => {
+    if (queue.length === 0) return -1;
+    const refIdx = currentIndexRef.current;
+    if (refIdx >= 0 && refIdx < queue.length && queue[refIdx] === curId) {
+      return refIdx;
+    }
+    return curId ? queue.indexOf(curId) : -1;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (transitionLockTimerRef.current !== null) {
+        window.clearTimeout(transitionLockTimerRef.current);
+      }
+    };
   }, []);
 
   const registerTracks = useCallback((tracks: Track[]) => {
@@ -1369,7 +1414,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       currentTrackIdRef.current = track.id;
       setCurrentTrackId(track.id);
       setCurrentTime(safeStart);
-      setDuration(track.duration || 0);
+      const hasFullMetaDuration =
+        Number.isFinite(track.duration) &&
+        track.duration > 35 &&
+        !isPreviewAudioUrl(track.audioUrl);
+      setDuration(hasFullMetaDuration ? track.duration : 0);
       setIsBuffering(true);
 
       // Local MP3s play directly via HTML5 <audio> pool
@@ -1429,24 +1478,33 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return;
       }
 
-      // Online tracks: resolve YouTube videoId first (keep outgoing track fading smoothly if needed)
-      let videoId = track.videoId;
-      if (!videoId) {
-        videoId = (await resolveYouTubeVideoId(track.artist, track.title)) || undefined;
-        if (playRequestSeqRef.current !== reqSeq) return;
+      // Online tracks (including Search Results): ALWAYS resolve full stream via YouTube first,
+      // never playing a 30s previewUrl unless all full-stream resolvers fail.
+      const resolved = await resolveFullStream(track);
+      if (playRequestSeqRef.current !== reqSeq) return;
 
-        if (videoId) {
-          setTrackRegistry((prev) => {
-            const existing = prev[track.id];
-            return {
-              ...prev,
-              [track.id]: { ...(existing || track), videoId },
-            };
-          });
-        }
-      }
-
+      const videoId = resolved.videoId;
       if (videoId) {
+        setTrackRegistry((prev) => {
+          const existing = prev[track.id];
+          const nextDuration =
+            resolved.duration && resolved.duration > 45
+              ? resolved.duration
+              : existing?.duration || track.duration;
+          return {
+            ...prev,
+            [track.id]: {
+              ...(existing || track),
+              videoId,
+              duration: nextDuration,
+              isPreview: false,
+            },
+          };
+        });
+        if (resolved.duration && resolved.duration > 45) {
+          setDuration(resolved.duration);
+        }
+
         const candidateDeck: 0 | 1 =
           prevEngine === 'youtube' ? (prevYtDeck === 0 ? 1 : 0) : prevYtDeck;
         const nextDeck: 0 | 1 =
@@ -1493,7 +1551,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return;
       }
 
-      // Fallback HTML5 <audio> only if YouTube search returned no playable videoId
+      // Fallback HTML5 <audio>: full JioSaavn stream or 30s previewUrl as absolute last resort
       const nextSlot: 0 | 1 =
         prevEngine === 'html5' ? (prevHtml5Slot === 0 ? 1 : 0) : prevHtml5Slot;
       const incomingAudio = html5PoolRef.current[nextSlot];
@@ -1514,12 +1572,22 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       activeHtml5SlotRef.current = nextSlot;
       pendingYtVideoIdsRef.current = [null, null];
 
-      const srcUrl = track.audioUrl || track.fallbackAudioUrls?.[0];
+      const srcUrl = resolved.audioUrl || track.audioUrl || track.fallbackAudioUrls?.[0];
       clearHtml5Fade(nextSlot);
       if (!incomingAudio || !srcUrl) {
         setIsBuffering(false);
         setIsPlaying(false);
         return;
+      }
+
+      if (resolved.isPreviewFallback) {
+        setTrackRegistry((prev) => {
+          const existing = prev[track.id];
+          return {
+            ...prev,
+            [track.id]: { ...(existing || track), isPreview: true },
+          };
+        });
       }
 
       try {
@@ -1569,21 +1637,26 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const curId = currentTrackIdRef.current;
     if (!curId || q.length === 0) return;
 
-    const idx = q.indexOf(curId);
-    let nextId: string | undefined;
+    const idx = getResolvedCurrentIndex(q, curId);
+    let nextIdx = -1;
     if (idx !== -1 && idx + 1 < q.length) {
-      nextId = q[idx + 1];
+      nextIdx = idx + 1;
     } else if (loopModeRef.current === 'all' && q.length > 0) {
-      nextId = q[0];
+      nextIdx = 0;
     }
 
+    const nextId = nextIdx !== -1 ? q[nextIdx] : undefined;
     if (!nextId || nextId === curId) return;
     const nextTrack = trackRegistryRef.current[nextId];
     if (!nextTrack) return;
 
+    if (!acquireTransitionLock(1500)) return;
     crossfadeTriggeredSeqRef.current = playRequestSeqRef.current;
+    currentIndexRef.current = nextIdx;
+    setCurrentIndex(nextIdx);
+    currentTrackIdRef.current = nextTrack.id;
     startPlaybackRef.current(nextTrack, false, 'auto');
-  }, []);
+  }, [acquireTransitionLock, getResolvedCurrentIndex]);
 
   useEffect(() => {
     advanceQueueOnEndOrSkipRef.current = () => {
@@ -1623,10 +1696,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
 
-      const idx = curId ? q.indexOf(curId) : -1;
+      // 1.5s debounce/lock prevents duplicate YT.PlayerState.ENDED + HTML5 onEnded double-skips
+      if (!acquireTransitionLock(1500)) return;
+
+      const idx = getResolvedCurrentIndex(q, curId);
       if (idx !== -1 && idx + 1 < q.length) {
-        const nextTrack = trackRegistryRef.current[q[idx + 1]];
+        const nextIdx = idx + 1;
+        const nextTrack = trackRegistryRef.current[q[nextIdx]];
         if (nextTrack) {
+          currentIndexRef.current = nextIdx;
+          setCurrentIndex(nextIdx);
           currentTrackIdRef.current = nextTrack.id;
           startPlaybackRef.current(nextTrack, false, 'auto');
           return;
@@ -1636,6 +1715,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (mode === 'all' && q.length > 0) {
         const firstTrack = trackRegistryRef.current[q[0]];
         if (firstTrack) {
+          currentIndexRef.current = 0;
+          setCurrentIndex(0);
           currentTrackIdRef.current = firstTrack.id;
           startPlaybackRef.current(firstTrack, false, 'auto');
           return;
@@ -1667,6 +1748,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     )
                   : moodOrdered;
                 const newIds = orderedFresh.map((t) => t.id);
+                const prevLen = queueIdsRef.current.length;
                 const nextOrig = [...originalQueueIdsRef.current, ...moodOrdered.map((t) => t.id)];
                 const nextQ = [...queueIdsRef.current, ...newIds];
                 originalQueueIdsRef.current = nextOrig;
@@ -1676,6 +1758,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 const nextId = newIds[0];
                 const nextTrack = trackRegistryRef.current[nextId];
                 if (nextTrack) {
+                  currentIndexRef.current = prevLen;
+                  setCurrentIndex(prevLen);
                   currentTrackIdRef.current = nextTrack.id;
                   startPlaybackRef.current(nextTrack, false, 'auto');
                   pushToast(
@@ -1699,7 +1783,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setIsPlaying(false);
       setIsBuffering(false);
     };
-  }, [pushToast, registerTracks]);
+  }, [acquireTransitionLock, getResolvedCurrentIndex, pushToast, registerTracks]);
 
   // Initialize Dual YouTube IFrame Players (Deck 0 & Deck 1) ONCE using isolated slot elements
   useEffect(() => {
@@ -1795,6 +1879,23 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                   const cur = event.target.getCurrentTime?.();
                   if (Number.isFinite(dur) && dur > 0) {
                     setDuration(dur);
+                    const activeId = currentTrackIdRef.current;
+                    if (activeId && dur > 35) {
+                      const roundedDur = Math.round(dur);
+                      setTrackRegistry((prev) => {
+                        const existing = prev[activeId];
+                        if (!existing) return prev;
+                        if (existing.duration === roundedDur && !existing.isPreview) return prev;
+                        return {
+                          ...prev,
+                          [activeId]: {
+                            ...existing,
+                            duration: roundedDur,
+                            isPreview: false,
+                          },
+                        };
+                      });
+                    }
                   }
                   if (
                     Number.isFinite(cur) &&
@@ -1824,20 +1925,28 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               const curId = currentTrackIdRef.current;
               const curTrack = curId ? trackRegistryRef.current[curId] : null;
 
-              // Silent recovery 1: search an alternate embeddable audio/lyric video for the same song
+              // Silent recovery 1: search an alternate full embeddable lyric/audio video for the same song
               if (curTrack && !ytAltTriedRef.current[curTrack.id]) {
                 ytAltTriedRef.current[curTrack.id] = true;
                 try {
                   const alts = await searchYouTubeTracks(
-                    `${curTrack.artist} ${curTrack.title} lyrics audio`,
+                    `${curTrack.title} ${curTrack.artist} lyrics`,
                     undefined,
                     6
                   );
-                  const alt = alts.find((a) => a.videoId && a.videoId !== curTrack.videoId);
+                  const alt =
+                    alts.find(
+                      (a) => a.videoId && a.videoId !== curTrack.videoId && a.duration >= 45
+                    ) || alts.find((a) => a.videoId && a.videoId !== curTrack.videoId);
                   if (alt?.videoId && currentTrackIdRef.current === curTrack.id) {
                     setTrackRegistry((prev) => ({
                       ...prev,
-                      [curTrack.id]: { ...curTrack, videoId: alt.videoId },
+                      [curTrack.id]: {
+                        ...curTrack,
+                        videoId: alt.videoId,
+                        duration: alt.duration >= 45 ? alt.duration : curTrack.duration,
+                        isPreview: false,
+                      },
                     }));
                     ytPlayersRef.current[deckIdx]?.loadVideoById(alt.videoId);
                     return;
@@ -1847,7 +1956,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 }
               }
 
-              // Silent recovery 2: fall back to direct HTML5 audioUrl if available
+              // Silent recovery 2: fall back to direct full HTML5 audioUrl (or previewUrl only as final resort)
               if (curTrack?.audioUrl) {
                 const slot = activeHtml5SlotRef.current;
                 activeEngineRef.current = 'html5';
@@ -1869,10 +1978,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               if (consecutiveErrorSkipsRef.current < 3) {
                 consecutiveErrorSkipsRef.current += 1;
                 const q = queueIdsRef.current;
-                const idx = curId ? q.indexOf(curId) : -1;
+                const idx = getResolvedCurrentIndex(q, curId);
                 if (idx !== -1 && idx + 1 < q.length) {
-                  const nextTrack = trackRegistryRef.current[q[idx + 1]];
+                  const nextIdx = idx + 1;
+                  const nextTrack = trackRegistryRef.current[q[nextIdx]];
                   if (nextTrack) {
+                    currentIndexRef.current = nextIdx;
+                    setCurrentIndex(nextIdx);
                     startPlaybackRef.current(nextTrack, true, 'direct');
                     return;
                   }
@@ -1902,7 +2014,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ytReadyRef.current[deckIdx] = false;
       });
     };
-  }, [applyHtml5SlotGain, applyYtDeckGain, clearYtFade, fadeInYtDeck]);
+  }, [applyHtml5SlotGain, applyYtDeckGain, clearYtFade, fadeInYtDeck, getResolvedCurrentIndex]);
 
   // Active 200ms polling loop for active YouTube deck currentTime, duration, synced lyrics & auto cross-fade
   useEffect(() => {
@@ -1930,6 +2042,23 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const dur = player.getDuration?.();
         if (Number.isFinite(dur) && dur > 0) {
           setDuration(dur);
+          const activeId = currentTrackIdRef.current;
+          if (activeId && dur > 35) {
+            const roundedDur = Math.round(dur);
+            setTrackRegistry((prev) => {
+              const existing = prev[activeId];
+              if (!existing) return prev;
+              if (existing.duration === roundedDur && !existing.isPreview) return prev;
+              return {
+                ...prev,
+                [activeId]: {
+                  ...existing,
+                  duration: roundedDur,
+                  isPreview: false,
+                },
+              };
+            });
+          }
         }
 
         const cur = player.getCurrentTime?.();
@@ -2088,16 +2217,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     (
       track: Track,
       contextTracks?: Track[],
-      options?: { preserveOrder?: boolean }
+      _options?: { preserveOrder?: boolean }
     ) => {
-      const globalPool = [
-        track,
-        ...indonesiaTrending,
-        ...featuredTracks,
-        ...viralTracks,
-        ...indieRnbTracks,
-        ...Object.values(trackRegistryRef.current),
-      ];
+      releaseTransitionLock();
 
       if (track.id === currentTrackIdRef.current && !contextTracks) {
         const deckIdx = activeYtDeckRef.current;
@@ -2124,90 +2246,54 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
 
-      // Clicking a track already inside the visible Queue plays it in-place without scrambling order
+      // Clicking a track already inside the visible Queue updates currentIndex in-place without scrambling
       if (!contextTracks && queueIdsRef.current.includes(track.id)) {
         registerTracks([track]);
+        const idxInQueue = queueIdsRef.current.indexOf(track.id);
+        currentIndexRef.current = idxInQueue;
+        setCurrentIndex(idxInQueue);
         currentTrackIdRef.current = track.id;
         startPlaybackForTrack(track, false, 'skip');
         return;
       }
 
-      const mixSeq = ++moodMixSeqRef.current;
+      ++moodMixSeqRef.current;
 
-      if (options?.preserveOrder && contextTracks && contextTracks.length > 0) {
+      if (contextTracks && contextTracks.length > 0) {
+        // Explicit sequential queue (index 0, 1, 2, ...) matching Search Results / Playlist / Shelf order
         registerTracks(contextTracks);
         const baseIds = Array.from(new Set(contextTracks.map((t) => t.id)));
         if (!baseIds.includes(track.id)) baseIds.unshift(track.id);
+        const clickedIdx = baseIds.indexOf(track.id);
+
         isShuffledRef.current = false;
         setIsShuffled(false);
         originalQueueIdsRef.current = baseIds;
         queueIdsRef.current = baseIds;
         setOriginalQueueIds(baseIds);
         setQueueIds(baseIds);
+        currentIndexRef.current = clickedIdx;
+        setCurrentIndex(clickedIdx);
       } else {
-        const primaryCandidates =
-          contextTracks && contextTracks.length > 0 ? contextTracks : globalPool;
-        const mixedTracks = mixTracksByMood(track, primaryCandidates, globalPool).slice(0, 35);
-        registerTracks(mixedTracks);
+        const globalPool = [
+          track,
+          ...indonesiaTrending,
+          ...featuredTracks,
+          ...viralTracks,
+          ...indieRnbTracks,
+        ];
+        registerTracks(globalPool);
+        const baseIds = Array.from(new Set(globalPool.map((t) => t.id)));
+        const clickedIdx = baseIds.indexOf(track.id);
 
-        const baseIds = mixedTracks.map((t) => t.id);
         isShuffledRef.current = false;
         setIsShuffled(false);
         originalQueueIdsRef.current = baseIds;
         queueIdsRef.current = baseIds;
         setOriginalQueueIds(baseIds);
         setQueueIds(baseIds);
-
-        // Background mood enrichment if fewer than 6 same-mood upcoming tracks exist
-        const anchorMood = detectTrackMood(track);
-        const upcomingSameMoodCount = mixedTracks
-          .slice(1)
-          .filter((t) => detectTrackMood(t).mood === anchorMood.mood).length;
-
-        if (track.sourceType !== 'local' && upcomingSameMoodCount < 6) {
-          searchOnlineTracks(anchorMood.autoplayHint, undefined, 16)
-            .then(({ tracks: fetched }) => {
-              if (
-                moodMixSeqRef.current !== mixSeq ||
-                currentTrackIdRef.current !== track.id ||
-                isShuffledRef.current
-              ) {
-                return;
-              }
-              const currentQ = queueIdsRef.current;
-              const sameMoodAdditions = fetched.filter(
-                (t) =>
-                  !currentQ.includes(t.id) &&
-                  detectTrackMood(t).mood === anchorMood.mood
-              );
-              if (sameMoodAdditions.length === 0) return;
-
-              registerTracks(sameMoodAdditions);
-              const existingTracks = currentQ
-                .map((id) => trackRegistryRef.current[id])
-                .filter((t): t is Track => Boolean(t));
-              const curIdx = currentQ.indexOf(track.id);
-              const prefixIds = curIdx > 0 ? currentQ.slice(0, curIdx + 1) : [track.id];
-              const remainingExisting = existingTracks.filter(
-                (t) => !prefixIds.includes(t.id)
-              );
-              const remixedTail = mixTracksByMood(
-                track,
-                [...remainingExisting, ...sameMoodAdditions]
-              )
-                .filter((t) => !prefixIds.includes(t.id))
-                .slice(0, 35 - prefixIds.length);
-              const nextQ = [...prefixIds, ...remixedTail.map((t) => t.id)];
-
-              originalQueueIdsRef.current = nextQ;
-              queueIdsRef.current = nextQ;
-              setOriginalQueueIds(nextQ);
-              setQueueIds(nextQ);
-            })
-            .catch(() => {
-              // Keep immediate local/trending mood mix silently
-            });
-        }
+        currentIndexRef.current = clickedIdx;
+        setCurrentIndex(clickedIdx);
       }
 
       currentTrackIdRef.current = track.id;
@@ -2218,6 +2304,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       indieRnbTracks,
       indonesiaTrending,
       registerTracks,
+      releaseTransitionLock,
       startPlaybackForTrack,
       viralTracks,
     ]
@@ -2225,24 +2312,26 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const playTrackAtTime = useCallback(
     (track: Track, startSeconds = 0) => {
+      releaseTransitionLock();
       const pool = [
         track,
         ...indonesiaTrending,
         ...featuredTracks,
         ...viralTracks,
         ...indieRnbTracks,
-        ...Object.values(trackRegistryRef.current),
       ];
-      const mixed = mixTracksByMood(track, pool).slice(0, 35);
-      registerTracks(mixed);
+      registerTracks(pool);
 
-      const baseIds = mixed.map((t) => t.id);
+      const baseIds = Array.from(new Set(pool.map((t) => t.id)));
+      const idx = baseIds.indexOf(track.id);
       isShuffledRef.current = false;
       setIsShuffled(false);
       originalQueueIdsRef.current = baseIds;
       queueIdsRef.current = baseIds;
       setOriginalQueueIds(baseIds);
       setQueueIds(baseIds);
+      currentIndexRef.current = idx;
+      setCurrentIndex(idx);
 
       if (track.id === currentTrackIdRef.current) {
         const deckIdx = activeYtDeckRef.current;
@@ -2271,6 +2360,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       indieRnbTracks,
       indonesiaTrending,
       registerTracks,
+      releaseTransitionLock,
       startPlaybackForTrack,
       viralTracks,
     ]
@@ -2339,28 +2429,19 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const queue = queueIdsRef.current;
     if (queue.length === 0) return;
 
-    const curId = currentTrackIdRef.current;
-    const currentIndex = curId ? queue.indexOf(curId) : -1;
+    // 1.5s debounce / lock prevents double triggers from UI + onEnded / YT.PlayerState.ENDED
+    if (!acquireTransitionLock(1500)) return;
 
-    // When Shuffle is OFF, strictly play the next track sequentially in Queue order
-    if (!isShuffledRef.current) {
-      const nextIdx = currentIndex === -1 ? 0 : (currentIndex + 1) % queue.length;
-      const nextTrack = trackRegistryRef.current[queue[nextIdx]];
-      if (nextTrack) {
-        currentTrackIdRef.current = nextTrack.id;
-        startPlaybackForTrack(nextTrack, false, 'skip');
-      }
-      return;
-    }
-
-    // When Shuffle is ON, advance along the shuffled queue
-    const nextIdx = currentIndex === -1 ? 0 : (currentIndex + 1) % queue.length;
+    const curIdx = getResolvedCurrentIndex(queue, currentTrackIdRef.current);
+    const nextIdx = curIdx === -1 ? 0 : (curIdx + 1) % queue.length;
     const nextTrack = trackRegistryRef.current[queue[nextIdx]];
     if (nextTrack) {
+      currentIndexRef.current = nextIdx;
+      setCurrentIndex(nextIdx);
       currentTrackIdRef.current = nextTrack.id;
       startPlaybackForTrack(nextTrack, false, 'skip');
     }
-  }, [startPlaybackForTrack]);
+  }, [acquireTransitionLock, getResolvedCurrentIndex, startPlaybackForTrack]);
 
   const seekTo = useCallback(
     (seconds: number) => {
@@ -2401,15 +2482,18 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const queue = queueIdsRef.current;
     if (queue.length === 0) return;
-    const curId = currentTrackIdRef.current;
-    const currentIndex = curId ? queue.indexOf(curId) : 0;
-    const prevIdx = currentIndex <= 0 ? queue.length - 1 : currentIndex - 1;
+    if (!acquireTransitionLock(1500)) return;
+
+    const curIdx = getResolvedCurrentIndex(queue, currentTrackIdRef.current);
+    const prevIdx = curIdx <= 0 ? queue.length - 1 : curIdx - 1;
     const prevTrack = trackRegistryRef.current[queue[prevIdx]];
     if (prevTrack) {
+      currentIndexRef.current = prevIdx;
+      setCurrentIndex(prevIdx);
       currentTrackIdRef.current = prevTrack.id;
       startPlaybackForTrack(prevTrack, false, 'skip');
     }
-  }, [seekTo, startPlaybackForTrack]);
+  }, [acquireTransitionLock, getResolvedCurrentIndex, seekTo, startPlaybackForTrack]);
 
   const togglePlayPauseRef = useRef(togglePlayPause);
   togglePlayPauseRef.current = togglePlayPause;
@@ -2442,8 +2526,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const base =
       originalQueueIdsRef.current.length > 0 ? originalQueueIdsRef.current : queueIdsRef.current;
+    const cur = currentTrackIdRef.current;
     if (next) {
-      const cur = currentTrackIdRef.current;
       const anchorTrack = cur ? trackRegistryRef.current[cur] || null : null;
       const otherTracks = (cur ? base.filter((id) => id !== cur) : base)
         .map((id) => trackRegistryRef.current[id])
@@ -2456,11 +2540,17 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const shuffled = cur ? [cur, ...smartOrderedIds] : smartOrderedIds;
       queueIdsRef.current = shuffled;
       setQueueIds(shuffled);
+      const nextIdx = cur ? shuffled.indexOf(cur) : -1;
+      currentIndexRef.current = nextIdx;
+      setCurrentIndex(nextIdx);
       pushToast('Smart Shuffle aktif (hindari artis sama & sesuai riwayat)', 'success');
     } else {
       const restored = [...base];
       queueIdsRef.current = restored;
       setQueueIds(restored);
+      const nextIdx = cur ? restored.indexOf(cur) : -1;
+      currentIndexRef.current = nextIdx;
+      setCurrentIndex(nextIdx);
       pushToast('Urutan antrean normal', 'info');
     }
   }, [pushToast]);
@@ -2602,6 +2692,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       queueIdsRef.current = nextQueue;
       setQueueIds(nextQueue);
+      if (curId) {
+        const idx = nextQueue.indexOf(curId);
+        currentIndexRef.current = idx;
+        setCurrentIndex(idx);
+      }
       pushToast(`"${track.title}" ditambahkan ke antrean`, 'success');
     },
     [pushToast, registerTracks]
@@ -2620,16 +2715,25 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       if (targetId === currentTrackIdRef.current) {
         if (nextList.length > 0) {
-          const replacement = trackRegistryRef.current[nextList[Math.min(index, nextList.length - 1)]];
+          const nextIdx = Math.min(index, nextList.length - 1);
+          const replacement = trackRegistryRef.current[nextList[nextIdx]];
           if (replacement) {
+            currentIndexRef.current = nextIdx;
+            setCurrentIndex(nextIdx);
             currentTrackIdRef.current = replacement.id;
             startPlaybackRef.current(replacement, false, 'skip');
             return;
           }
         }
         pauseActivePlayback();
+        currentIndexRef.current = -1;
+        setCurrentIndex(-1);
         currentTrackIdRef.current = null;
         setCurrentTrackId(null);
+      } else if (currentTrackIdRef.current) {
+        const newIdx = nextList.indexOf(currentTrackIdRef.current);
+        currentIndexRef.current = newIdx;
+        setCurrentIndex(newIdx);
       }
     },
     [pauseActivePlayback]
@@ -2651,6 +2755,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     copy.splice(toIndex, 0, moved);
     queueIdsRef.current = copy;
     setQueueIds(copy);
+    if (currentTrackIdRef.current) {
+      const newIdx = copy.indexOf(currentTrackIdRef.current);
+      currentIndexRef.current = newIdx;
+      setCurrentIndex(newIdx);
+    }
   }, []);
 
   const clearUpcomingQueue = useCallback(() => {
@@ -2659,6 +2768,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       isPlayingRef.current && curId && queueIdsRef.current.includes(curId) ? [curId] : [];
     queueIdsRef.current = nextQueue;
     setQueueIds(nextQueue);
+    const nextIdx = nextQueue.length > 0 ? 0 : -1;
+    currentIndexRef.current = nextIdx;
+    setCurrentIndex(nextIdx);
     pushToast('Antrean dibersihkan', 'info');
   }, [pushToast]);
 
@@ -2887,6 +2999,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     loopMode,
     queueIds,
     queueTracks,
+    currentIndex,
     currentMood,
     ambientColor: ambientPalette.primary,
     ambientPalette,

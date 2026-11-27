@@ -72,6 +72,15 @@ interface ItunesRssEntry {
   link?: Array<{ attributes?: { href?: string; type?: string } }> | { attributes?: { href?: string } };
 }
 
+interface DeezerSearchItem {
+  id?: number;
+  title?: string;
+  duration?: number;
+  preview?: string;
+  artist?: { name?: string };
+  album?: { title?: string; cover_xl?: string; cover_big?: string; cover_medium?: string };
+}
+
 function decodeText(input: string): string {
   return input
     .replace(/&quot;/g, '"')
@@ -81,6 +90,68 @@ function decodeText(input: string): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .trim();
+}
+
+function normalizeSearchText(input: string): string {
+  return decodeText(input)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function compactSearchText(input: string): string {
+  return normalizeSearchText(input).replace(/\s+/g, '');
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  if (Math.abs(m - n) > 4) return Math.abs(m - n);
+
+  const dp: number[] = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const temp = dp[j];
+      if (a[i - 1] === b[j - 1]) {
+        dp[j] = prev;
+      } else {
+        dp[j] = 1 + Math.min(prev, dp[j], dp[j - 1]);
+      }
+      prev = temp;
+    }
+  }
+  return dp[n];
+}
+
+function bigramSimilarity(a: string, b: string): number {
+  if (a.length < 2 || b.length < 2) return 0;
+  const getBigrams = (str: string) => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < str.length - 1; i++) {
+      const bg = str.slice(i, i + 2);
+      map.set(bg, (map.get(bg) || 0) + 1);
+    }
+    return map;
+  };
+  const mapA = getBigrams(a);
+  const mapB = getBigrams(b);
+  let intersection = 0;
+  let totalA = 0;
+  let totalB = 0;
+  for (const v of mapA.values()) totalA += v;
+  for (const v of mapB.values()) totalB += v;
+  for (const [bg, countA] of mapA.entries()) {
+    const countB = mapB.get(bg) || 0;
+    intersection += Math.min(countA, countB);
+  }
+  return (2 * intersection) / (totalA + totalB || 1);
 }
 
 function normalizeDedupKey(title: string, artist: string): string {
@@ -353,7 +424,7 @@ async function queryJioSaavn(query: string, limit = 30): Promise<CatalogTrack[]>
 
 async function queryItunes(query: string, limit = 30): Promise<CatalogTrack[]> {
   try {
-    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=${limit}`;
+    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&country=ID&lang=id_id&media=music&entity=song&limit=${limit}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return [];
     const json = (await res.json()) as { results?: ItunesSearchResult[] };
@@ -375,6 +446,84 @@ async function queryItunes(query: string, limit = 30): Promise<CatalogTrack[]> {
   } catch {
     return [];
   }
+}
+
+async function queryDeezer(query: string, limit = 25): Promise<CatalogTrack[]> {
+  try {
+    const url = `https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=${limit}`;
+    const res = await fetch(url, {
+      headers: { 'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7' },
+      signal: AbortSignal.timeout(4500),
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { data?: DeezerSearchItem[] };
+    const items = Array.isArray(json?.data) ? json.data : [];
+
+    return items
+      .filter((r) => Boolean(r.title && r.artist?.name))
+      .map((r) => ({
+        id: `deezer-${r.id ?? Math.random().toString(36).slice(2, 9)}`,
+        title: decodeText(r.title || 'Lagu'),
+        artist: decodeText(r.artist?.name || 'Artis'),
+        album: decodeText(r.album?.title || 'Single'),
+        duration: r.duration && r.duration > 0 ? Math.round(r.duration) : 210,
+        coverUrl: r.album?.cover_xl || r.album?.cover_big || r.album?.cover_medium || '',
+        audioUrl: r.preview,
+        sourceType: 'online' as const,
+        isPreview: false,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+async function queryPipedMusicFallback(query: string, limit = 15): Promise<CatalogTrack[]> {
+  const pipedMirrors = [
+    'https://pipedapi.kavin.rocks',
+    'https://api.piped.private.coffee',
+  ];
+
+  for (const mirror of pipedMirrors) {
+    try {
+      const url = `${mirror}/search?q=${encodeURIComponent(query)}&filter=music_songs`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (!res.ok) continue;
+      const json = (await res.json()) as {
+        items?: Array<{
+          url?: string;
+          title?: string;
+          uploaderName?: string;
+          thumbnail?: string;
+          duration?: number;
+        }>;
+      };
+      const items = Array.isArray(json?.items) ? json.items : [];
+      const mapped: CatalogTrack[] = [];
+      for (const item of items) {
+        const match = item.url?.match(/[?&]v=([a-zA-Z0-9_-]{11})/) || item.url?.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/);
+        const videoId = match?.[1];
+        if (!videoId || !item.title) continue;
+        const dur = item.duration && item.duration > 40 ? Math.round(item.duration) : 210;
+        const { title, artist } = cleanMusicTitleAndArtist(item.title, item.uploaderName);
+        mapped.push({
+          id: `yt-${videoId}`,
+          videoId,
+          title,
+          artist,
+          album: 'YouTube Music',
+          duration: dur,
+          coverUrl: item.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          sourceType: 'online',
+          isPreview: false,
+        });
+        if (mapped.length >= limit) break;
+      }
+      if (mapped.length > 0) return mapped;
+    } catch {
+      // Try next mirror
+    }
+  }
+  return [];
 }
 
 async function fetchAppleTopChart(country: string, limit = 20): Promise<CatalogTrack[]> {
@@ -423,41 +572,70 @@ async function fetchAppleTopChart(country: string, limit = 20): Promise<CatalogT
 }
 
 function scoreTrackRelevance(track: CatalogTrack, query: string, orderIdx: number): number {
-  const q = query
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const q = normalizeSearchText(query);
   if (!q) return -orderIdx * 0.1;
 
-  const t = track.title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const a = track.artist
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const t = normalizeSearchText(track.title);
+  const a = normalizeSearchText(track.artist);
+  const qCompact = compactSearchText(query);
+  const tCompact = compactSearchText(track.title);
+  const aCompact = compactSearchText(track.artist);
+  const combinedCompact = `${tCompact}${aCompact}`;
 
-  let score = -orderIdx * 0.15;
+  let score = -orderIdx * 0.12;
 
-  if (a === q) score += 24;
-  else if (a.startsWith(q) || a.includes(q)) score += 14;
+  // Exact or substring normalized match
+  if (a === q) score += 26;
+  else if (a.startsWith(q) || a.includes(q)) score += 15;
 
-  if (t === q) score += 18;
-  else if (t.startsWith(q) || t.includes(q)) score += 8;
+  if (t === q) score += 28;
+  else if (t.startsWith(q)) score += 18;
+  else if (t.includes(q)) score += 12;
 
-  const qTokens = q.split(' ').filter((tok) => tok.length >= 2);
-  if (qTokens.length > 1) {
-    const matched = qTokens.filter((tok) => a.includes(tok) || t.includes(tok)).length;
-    score += matched * 3;
+  // Compact match catches joined/split Indonesian queries like "rumah kerumah" -> "Rumah Ke Rumah"
+  if (qCompact.length >= 4) {
+    if (tCompact === qCompact) score += 32;
+    else if (tCompact.includes(qCompact)) score += 24;
+    else if (aCompact === qCompact) score += 24;
+    else if (combinedCompact.includes(qCompact)) score += 18;
+    else {
+      const simTitle = bigramSimilarity(qCompact, tCompact);
+      const simCombined = bigramSimilarity(qCompact, `${tCompact}${aCompact}`);
+      const bestSim = Math.max(simTitle, simCombined);
+      if (bestSim >= 0.55) {
+        score += bestSim * 22;
+      }
+    }
   }
+
+  // Fuzzy token matching (handles spelling typos per word)
+  const qTokens = q.split(' ').filter((tok) => tok.length >= 2);
+  const targetTokens = `${t} ${a}`.split(' ').filter((tok) => tok.length >= 2);
+  if (qTokens.length > 0) {
+    let tokenScore = 0;
+    for (const qt of qTokens) {
+      if (a.includes(qt) || t.includes(qt)) {
+        tokenScore += 4.5;
+        continue;
+      }
+      const maxDist = qt.length >= 7 ? 2 : qt.length >= 4 ? 1 : 0;
+      if (maxDist > 0) {
+        const fuzzyHit = targetTokens.some((tt) => levenshteinDistance(qt, tt) <= maxDist);
+        if (fuzzyHit) {
+          tokenScore += 3.2;
+        }
+      }
+    }
+    score += tokenScore;
+  }
+
+  // Prefer playable full-duration tracks (especially with resolved YouTube videoId)
+  if (track.videoId) score += 2.5;
+  if (track.duration >= 90) score += 1;
 
   const combinedRaw = `${track.title} ${track.artist}`.toLowerCase();
   if (
-    !/(karaoke|masala|biography|tribute|ringtone|parody|rimek|mashup)/.test(q) &&
+    !/(karaoke|masala|biography|tribute|ringtone|parody|rimek|mashup|sped\s*up|slowed|reverb|cover)/.test(q) &&
     /\b(karaoke|masala|biography|song\s+for|not\s+a\s+.*song|tribute|ringtone|dj\s+viral\s+rimek)\b/i.test(
       combinedRaw
     )
@@ -507,7 +685,7 @@ async function startServer() {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '64kb' }));
 
-  // Combined Global + Indonesian Music Search (JioSaavn limit=30 + iTunes limit=30 -> up to 40 deduplicated tracks)
+  // Parallel Global + Indonesian Catalog + Smart YouTube Song Search (iTunes ID + Deezer + JioSaavn + YouTube)
   app.get('/api/music-search', async (req, res) => {
     const rawQ = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 140) : '';
     if (!rawQ) {
@@ -517,23 +695,30 @@ async function startServer() {
 
     const rawLimit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 40;
     const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(50, rawLimit)) : 40;
+    const ytSongQuery = /\b(audio|lyrics?|lirik|song|lagu|remix|cover|live|acoustic)\b/i.test(rawQ)
+      ? rawQ
+      : `${rawQ} song audio`;
 
     try {
-      const [itunesRes, saavnRes] = await Promise.allSettled([
-        queryItunes(rawQ, 30),
-        queryJioSaavn(rawQ, 30),
+      const [itunesRes, deezerRes, saavnRes, ytRes] = await Promise.allSettled([
+        queryItunes(rawQ, 25),
+        queryDeezer(rawQ, 25),
+        queryJioSaavn(rawQ, 20),
+        queryYouTubeInnerTube(ytSongQuery, 20).then(async (tracks) =>
+          tracks.length > 0 ? tracks : queryPipedMusicFallback(rawQ, 15)
+        ),
       ]);
 
       const itunesTracks = itunesRes.status === 'fulfilled' ? itunesRes.value : [];
+      const deezerTracks = deezerRes.status === 'fulfilled' ? deezerRes.value : [];
       const saavnTracks = saavnRes.status === 'fulfilled' ? saavnRes.value : [];
+      const ytTracks = ytRes.status === 'fulfilled' ? ytRes.value : [];
 
-      let merged = mergeAndDeduplicate([itunesTracks, saavnTracks], limit, rawQ);
-
-      // Supplement with YouTube search when a niche local/indie query needs deeper coverage
-      if (merged.length < 12) {
-        const ytFallback = await queryYouTubeInnerTube(`${rawQ} official audio`, 20).catch(() => []);
-        merged = mergeAndDeduplicate([merged, ytFallback], limit, rawQ);
-      }
+      const merged = mergeAndDeduplicate(
+        [itunesTracks, deezerTracks, ytTracks, saavnTracks],
+        limit,
+        rawQ
+      );
 
       res.setHeader('Cache-Control', 'public, max-age=120');
       res.json({ tracks: merged });
