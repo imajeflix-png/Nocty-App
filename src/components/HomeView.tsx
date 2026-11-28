@@ -137,14 +137,14 @@ const HorizontalTrackShelf: React.FC<HorizontalShelfProps> = ({ title, tracks, i
                     playTrack(track, tracks);
                   }
                 }}
-                className="group relative overflow-hidden w-[156px] sm:w-[184px] lg:w-[192px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-[24px] p-2.5 bg-gradient-to-br from-white/[0.10] to-white/[0.03] hover:from-white/[0.14] hover:to-white/[0.05] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.26),0_12px_28px_rgba(0,0,0,0.38)] transition-all duration-200"
+                className="group w-[152px] sm:w-[180px] lg:w-[188px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded-2xl p-2 bg-white/[0.04] hover:bg-white/[0.07] backdrop-blur-2xl border border-white/[0.08] transition-colors duration-200"
               >
-                <div className="relative aspect-square w-full rounded-2xl overflow-hidden shadow-lg shadow-black/45">
+                <div className="relative aspect-square w-full rounded-xl overflow-hidden shadow-lg shadow-black/50">
                   <CoverArt
                     src={track.coverUrl}
                     alt={track.title}
                     className="w-full h-full transition-transform duration-300 group-hover:scale-[1.03]"
-                    roundedClass="rounded-2xl"
+                    roundedClass="rounded-xl"
                   />
 
                   <span
@@ -165,7 +165,7 @@ const HorizontalTrackShelf: React.FC<HorizontalShelfProps> = ({ title, tracks, i
                 </div>
 
                 <p className="mt-2.5 px-0.5 text-sm font-medium text-white truncate">{track.title}</p>
-                <p className="px-0.5 pb-0.5 text-xs text-white/60 truncate mt-0.5">{track.artist}</p>
+                <p className="px-0.5 pb-0.5 text-xs text-zinc-400 truncate mt-0.5">{track.artist}</p>
               </div>
             );
           })}
@@ -293,24 +293,24 @@ export const HomeView: React.FC = () => {
 
   return (
     <div className="space-y-8 sm:space-y-10 pb-44 lg:pb-12">
-      {/* Spotify-Style Concave Liquid Glass Capsule Search Bar directly below Header */}
+      {/* Monochromatic Smoke Glass Capsule Search Bar */}
       <div className="space-y-4">
-        <div className="flex items-center gap-3 rounded-full bg-white/[0.07] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_8px_24px_rgba(0,0,0,0.28)] focus-within:bg-white/[0.11] focus-within:border-white/30 transition-all">
-          <Search className="w-4 h-4 text-white/65 shrink-0" strokeWidth={2} />
+        <div className="flex items-center gap-3 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3 focus-within:bg-white/[0.07] focus-within:border-white/20 transition-all">
+          <Search className="w-4 h-4 text-zinc-400 shrink-0" strokeWidth={2} />
           <input
             type="text"
             value={homeSearchQuery}
             onChange={(e) => setHomeSearchQuery(e.target.value)}
             placeholder="Cari lagu, artis, atau MV..."
             aria-label="Cari lagu, artis, atau MV"
-            className="flex-1 min-w-0 bg-transparent text-sm text-white placeholder-white/50 focus:outline-none"
+            className="flex-1 min-w-0 bg-transparent text-sm text-white placeholder-zinc-500 focus:outline-none"
           />
           {homeSearchQuery && (
             <button
               type="button"
               onClick={() => setHomeSearchQuery('')}
               aria-label="Bersihkan pencarian"
-              className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/75 hover:text-white transition-colors shrink-0"
+              className="w-7 h-7 rounded-full bg-white/[0.08] hover:bg-white/[0.15] flex items-center justify-center text-zinc-300 hover:text-white transition-colors shrink-0"
             >
               <X className="w-3.5 h-3.5" strokeWidth={2} />
             </button>
@@ -319,13 +319,13 @@ export const HomeView: React.FC = () => {
 
         {/* Live Filtered Matches while typing */}
         {trimmedHomeQuery && (
-          <section className="rounded-[28px] bg-gradient-to-br from-white/[0.10] to-white/[0.03] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] p-4 sm:p-5 space-y-3">
+          <section className="rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] p-4 sm:p-5 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="font-display text-base sm:text-lg font-bold text-white">
                   Hasil Pencarian
                 </h2>
-                <p className="text-xs text-white/60">
+                <p className="text-xs text-zinc-400">
                   <span className="font-mono-tabular">{liveFilteredTracks.length}</span> lagu cocok untuk &ldquo;{trimmedHomeQuery}&rdquo;
                 </p>
               </div>
@@ -335,7 +335,7 @@ export const HomeView: React.FC = () => {
                   setSearchQuery(trimmedHomeQuery);
                   setActiveView('explore');
                 }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/[0.10] hover:bg-white/[0.18] backdrop-blur-xl border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] text-xs font-medium text-white transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/[0.07] hover:bg-white/[0.12] border border-white/[0.10] text-xs font-medium text-white transition-colors whitespace-nowrap"
               >
                 <Search className="w-3.5 h-3.5" strokeWidth={2} />
                 <span>Cari online di Explore</span>
@@ -344,10 +344,10 @@ export const HomeView: React.FC = () => {
 
             {liveFilteredTracks.length === 0 ? (
               <div className="py-6 text-center space-y-2">
-                <p className="text-sm text-white/70">
+                <p className="text-sm text-zinc-300">
                   Belum ada lagu lokal/tangga lagu yang cocok di Beranda.
                 </p>
-                <p className="text-xs text-white/50">
+                <p className="text-xs text-zinc-500">
                   Ketuk &ldquo;Cari online di Explore&rdquo; untuk mencari katalog global &amp; Official MV.
                 </p>
               </div>
@@ -374,7 +374,7 @@ export const HomeView: React.FC = () => {
         </h1>
 
         {isTrendingLoading || !heroTrack ? (
-          <div className="rounded-[32px] bg-gradient-to-br from-white/[0.10] to-white/[0.03] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_16px_40px_rgba(0,0,0,0.45)] p-5 sm:p-7 flex flex-col sm:flex-row sm:items-center gap-6">
+          <div className="rounded-3xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] p-5 sm:p-7 flex flex-col sm:flex-row sm:items-center gap-6">
             <div className="w-44 h-44 sm:w-48 sm:h-48 aspect-square rounded-2xl bg-white/[0.06] animate-pulse shrink-0 mx-auto sm:mx-0" />
             <div className="flex-1 space-y-3">
               <div className="h-3.5 w-36 rounded bg-white/[0.06] animate-pulse" />
@@ -384,27 +384,14 @@ export const HomeView: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-white/[0.10] to-white/[0.03] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_16px_40px_rgba(0,0,0,0.45)] p-5 sm:p-7">
-            {/* Specular curved top highlight */}
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent z-20"
-            />
-            {/* Soft Ambient Cover Glow */}
+          <div className="relative overflow-hidden rounded-3xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] p-5 sm:p-7">
+            {/* Quiet Artwork-Adaptive Glow */}
             <div
               aria-hidden="true"
-              className="ambient-aura-layer pointer-events-none absolute -top-16 -left-10 w-80 h-80 rounded-full blur-3xl transition-all duration-1000"
+              className="ambient-aura-layer pointer-events-none absolute -top-20 -left-12 w-72 h-72 rounded-full blur-3xl transition-all duration-1000"
               style={{
-                opacity: Math.min(0.62, gradientIntensity * 1.05),
-                background: `radial-gradient(circle, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.95) 0%, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.55) 45%, transparent 72%)`,
-              }}
-            />
-            <div
-              aria-hidden="true"
-              className="ambient-aura-layer pointer-events-none absolute -bottom-20 right-0 w-72 h-72 rounded-full blur-3xl transition-all duration-1000"
-              style={{
-                opacity: Math.min(0.45, gradientIntensity * 0.78),
-                background: `radial-gradient(circle, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.9) 0%, transparent 70%)`,
+                opacity: Math.min(0.32, gradientIntensity * 0.65),
+                background: `radial-gradient(circle, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.85) 0%, transparent 72%)`,
               }}
             />
 
@@ -502,10 +489,10 @@ export const HomeView: React.FC = () => {
                   key={track.id}
                   type="button"
                   onClick={() => playTrack(track, quickPicks)}
-                  className={`group flex items-center gap-3 pr-3 rounded-2xl overflow-hidden text-left border backdrop-blur-2xl backdrop-saturate-150 transition-all duration-150 ${
+                  className={`group flex items-center gap-3 pr-3 rounded-xl overflow-hidden text-left border backdrop-blur-2xl transition-colors duration-150 ${
                     active
-                      ? 'bg-gradient-to-br from-white/[0.16] to-white/[0.06] border-white/[0.24] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_10px_28px_rgba(0,0,0,0.38)]'
-                      : 'bg-gradient-to-br from-white/[0.10] to-white/[0.03] hover:from-white/[0.14] hover:to-white/[0.05] border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.24),0_8px_24px_rgba(0,0,0,0.32)]'
+                      ? 'bg-white/[0.10] border-white/[0.16]'
+                      : 'bg-white/[0.04] hover:bg-white/[0.07] border-white/[0.08]'
                   }`}
                 >
                   <CoverArt
@@ -577,8 +564,8 @@ export const HomeView: React.FC = () => {
                   }
                   className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold transition-all active:scale-[0.97] whitespace-nowrap ${
                     selected
-                      ? 'bg-white text-[#0B0B0D] shadow-[0_6px_20px_rgba(255,255,255,0.25)]'
-                      : 'bg-white/[0.07] hover:bg-white/[0.13] backdrop-blur-2xl border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.24)] text-white/90 hover:text-white'
+                      ? 'bg-white text-[#0B0B0D]'
+                      : 'bg-white/[0.04] hover:bg-white/[0.08] backdrop-blur-2xl border border-white/[0.08] text-white/85 hover:text-white'
                   }`}
                 >
                   <AppleEmoji unified={preset.emojiUnified} size={14} />
@@ -651,9 +638,9 @@ export const HomeView: React.FC = () => {
                     handleMoodClick(mood);
                   }
                 }}
-                className="group relative overflow-hidden w-[156px] sm:w-[184px] lg:w-[192px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-[24px] p-2.5 bg-gradient-to-br from-white/[0.10] to-white/[0.03] hover:from-white/[0.14] hover:to-white/[0.05] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.26),0_12px_28px_rgba(0,0,0,0.38)] transition-all duration-200"
+                className="group w-[152px] sm:w-[180px] lg:w-[188px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded-2xl p-2 bg-white/[0.04] hover:bg-white/[0.07] backdrop-blur-2xl border border-white/[0.08] transition-colors duration-200"
               >
-                <div className="relative aspect-square w-full rounded-2xl overflow-hidden shadow-lg shadow-black/45">
+                <div className="relative aspect-square w-full rounded-xl overflow-hidden shadow-lg shadow-black/50">
                   <img
                     src={mood.coverUrl}
                     alt={mood.label}

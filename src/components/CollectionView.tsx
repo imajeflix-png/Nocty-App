@@ -77,7 +77,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({ mode }) => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 pb-5 border-b border-white/[0.08]">
         <div className="flex items-center gap-5 min-w-0">
-          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-white/[0.08] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] flex items-center justify-center shrink-0 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_14px_40px_rgba(0,0,0,0.45)]">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] flex items-center justify-center shrink-0">
             {mode === 'liked' ? (
               <Heart className="w-9 h-9 text-white fill-white" strokeWidth={1.75} />
             ) : mode === 'local' ? (

@@ -34,7 +34,7 @@ export const RightInspectorPanel: React.FC = () => {
   const { primary, secondary } = ambientPalette;
 
   const panelBody = (
-    <div className="relative flex flex-col h-full bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] rounded-[28px] overflow-hidden">
+    <div className="relative flex flex-col h-full bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] rounded-[24px] overflow-hidden">
       {/* Dual-Color Cover-Adaptive Ambient Aura behind Lyrics / Queue */}
       <div
         aria-hidden="true"

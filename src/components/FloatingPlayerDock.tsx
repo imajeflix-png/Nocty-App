@@ -104,22 +104,19 @@ export const FloatingPlayerDock: React.FC = () => {
 
   return (
     <>
-      {/* Mobile Floating Glass Mini-Player cleanly floating above Floating Bubble Nav (< lg) */}
+      {/* Mobile Floating Smoke Glass Mini-Player cleanly floating above Floating Bubble Nav (< lg) */}
       <div className="lg:hidden fixed bottom-[92px] left-3 right-3 z-30">
-        <div className="relative overflow-hidden rounded-3xl bg-white/[0.09] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.22] shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),0_16px_38px_rgba(0,0,0,0.48)]">
-          {/* Specular top glass edge highlight */}
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent z-20"
-          />
-          <div
-            aria-hidden="true"
-            className="ambient-aura-layer pointer-events-none absolute inset-0 blur-2xl transition-all duration-1000"
-            style={{
-              opacity: Math.min(0.45, gradientIntensity * 0.8),
-              background: `linear-gradient(110deg, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.8), rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.7))`,
-            }}
-          />
+        <div className="relative overflow-hidden rounded-2xl bg-white/[0.05] backdrop-blur-2xl border border-white/[0.10] shadow-[0_14px_34px_rgba(0,0,0,0.55)]">
+          {currentTrack && (
+            <div
+              aria-hidden="true"
+              className="ambient-aura-layer pointer-events-none absolute inset-0 blur-2xl transition-all duration-1000"
+              style={{
+                opacity: Math.min(0.24, gradientIntensity * 0.45),
+                background: `linear-gradient(110deg, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.7), rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.55))`,
+              }}
+            />
+          )}
 
           <div className="relative z-10 flex items-center justify-between gap-2 px-3 py-2">
             <button
@@ -229,25 +226,23 @@ export const FloatingPlayerDock: React.FC = () => {
         </div>
       </div>
 
-      {/* Desktop Floating Apple iOS 26 Liquid Glass Player Bar */}
+      {/* Desktop Floating Monochromatic Smoke Glass Player Bar */}
       <footer className="hidden lg:block px-3 pb-3 select-none">
-        <div className="relative h-[82px] w-full rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_16px_44px_rgba(0,0,0,0.5)] px-5 flex items-center justify-between gap-4 overflow-hidden">
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent z-20"
-          />
-          {/* Soft Dual-Color Ambient Aura behind Floating Glass Dock */}
-          <div
-            aria-hidden="true"
-            className="ambient-aura-layer pointer-events-none absolute inset-0 blur-3xl transition-all duration-1000"
-            style={{
-              opacity: Math.min(0.52, gradientIntensity * 0.85),
-              background: `
-                radial-gradient(ellipse 40% 110% at 15% 50%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.85) 0%, transparent 75%),
-                radial-gradient(ellipse 40% 110% at 85% 50%, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.75) 0%, transparent 75%)
-              `,
-            }}
-          />
+        <div className="relative h-[82px] w-full rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] shadow-[0_14px_40px_rgba(0,0,0,0.55)] px-5 flex items-center justify-between gap-4 overflow-hidden">
+          {/* Quiet Artwork-Only Ambient Tint */}
+          {currentTrack && (
+            <div
+              aria-hidden="true"
+              className="ambient-aura-layer pointer-events-none absolute inset-0 blur-3xl transition-all duration-1000"
+              style={{
+                opacity: Math.min(0.24, gradientIntensity * 0.45),
+                background: `
+                  radial-gradient(ellipse 40% 110% at 15% 50%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.75) 0%, transparent 75%),
+                  radial-gradient(ellipse 40% 110% at 85% 50%, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.6) 0%, transparent 75%)
+                `,
+              }}
+            />
+          )}
 
           {/* Left (30%): 52x52 Cover, Title, Artist (click to open Now Playing), Heart */}
           <div className="relative z-10 flex items-center gap-3 w-[30%] min-w-0">
@@ -548,7 +543,7 @@ export const FloatingPlayerDock: React.FC = () => {
             aria-modal="true"
             aria-label="Pengaturan Sleep Timer"
             onClick={(e) => e.stopPropagation()}
-            className="fixed inset-x-3 bottom-[156px] mx-auto max-w-[360px] lg:inset-x-auto lg:bottom-[100px] lg:right-4 lg:w-[320px] rounded-3xl bg-[#121216]/75 backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.20] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_20px_50px_rgba(0,0,0,0.65)] p-4 overflow-hidden"
+            className="fixed inset-x-3 bottom-[156px] mx-auto max-w-[360px] lg:inset-x-auto lg:bottom-[100px] lg:right-4 lg:w-[320px] rounded-2xl bg-[#121215]/92 backdrop-blur-2xl border border-white/[0.09] shadow-[0_20px_50px_rgba(0,0,0,0.75)] p-4 overflow-hidden"
           >
             {/* Subtle cover-adaptive ambient tint */}
             <div

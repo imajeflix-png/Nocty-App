@@ -1,133 +1,97 @@
 import React from 'react';
-import { ArrowUpRight, Heart, Radio, Receipt, Sparkles } from 'lucide-react';
+import { ArrowUpRight, ChevronRight } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
+import { formatDuration } from '../utils/audioUtils';
 import { triggerHaptic } from '../utils/haptics';
 
-const MINI_BARCODE_WIDTHS = [2, 1, 3, 1, 2, 1, 1, 3, 2, 1, 2, 3, 1, 1, 2, 1, 3, 2, 1, 2, 1, 3, 1, 2];
+const BARCODE_PATTERN = [
+  2, 1, 3, 1, 2, 1, 1, 3, 2, 1, 2, 3, 1, 1, 2, 1, 3, 2, 1, 2, 1, 3, 1, 2, 1, 2, 3, 1,
+];
 
 export const StudioView: React.FC = () => {
   const {
     currentTrack,
-    ambientPalette,
+    queueTracks,
     setIsSlipModalOpen,
     setIsTwinModalOpen,
     setIsWeeklyAuraOpen,
   } = usePlayer();
 
-  const { primary, secondary } = ambientPalette;
+  const previewTracks = [
+    currentTrack || queueTracks[0] || { title: 'Midnight Tape', artist: 'Nocty', duration: 204 },
+    queueTracks[1] || { title: 'Paper Static', artist: 'Analog', duration: 178 },
+    queueTracks[2] || { title: 'After Hours', artist: 'Session', duration: 246 },
+  ];
+
+  const totalSec = previewTracks.reduce((sum, item) => sum + (item.duration || 180), 0);
 
   return (
-    <div className="relative max-w-3xl mx-auto pb-44 lg:pb-12 space-y-6">
-      {/* Subtle Ambient Liquid Glass Depth Glow */}
-      <div
-        aria-hidden="true"
-        className="ambient-aura-layer pointer-events-none absolute -top-10 inset-x-0 h-64 blur-3xl opacity-30"
-        style={{
-          background: `
-            radial-gradient(circle at 22% 25%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.85) 0%, transparent 60%),
-            radial-gradient(circle at 80% 60%, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.78) 0%, transparent 60%)
-          `,
-        }}
-      />
-
-      {/* 1. Clean iOS Studio Header */}
-      <header className="relative z-10 pt-1 space-y-1">
-        <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-white">
+    <div className="relative max-w-2xl mx-auto pb-44 lg:pb-12 space-y-12">
+      {/* 1. Editorial Header */}
+      <header className="pt-2 space-y-1.5">
+        <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-white">
           Nocty Studio
         </h1>
-        <p className="text-xs sm:text-sm text-white/60">
-          Cetak &amp; bagikan momen musikmu
+        <p className="text-sm text-zinc-400">
+          Cetak struk musik, dengarkan bersama, dan arsipkan selera audio.
         </p>
       </header>
 
-      {/* 2. Apple iOS 26 Liquid Glass Bento Grid */}
-      <section aria-label="Nocty Studio Bento Grid" className="relative z-10 space-y-3.5">
-        {/* Hero Card (Full Width): Slip Nocty with Mini Receipt + Barcode Preview */}
+      {/* 2. Primary Visual Showcase: Slip Nocty (Unboxed, physical paper floating on dark surface) */}
+      <section aria-label="Slip Nocty Showcase">
         <button
           type="button"
           onClick={() => {
             triggerHaptic(12);
             setIsSlipModalOpen(true);
           }}
-          className="group relative w-full overflow-hidden rounded-[28px] bg-white/[0.07] hover:bg-white/[0.11] backdrop-blur-3xl backdrop-saturate-150 saturate-150 border border-white/[0.18] p-5 sm:p-6 text-left shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),0_12px_28px_rgba(0,0,0,0.4)] transition-all duration-200 active:scale-[0.99] flex items-center justify-between gap-4 sm:gap-6"
+          className="group w-full text-left flex flex-col sm:flex-row sm:items-center gap-8 sm:gap-10 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded-2xl"
         >
-          {/* Specular top glass highlight */}
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent"
-          />
+          {/* Physical Tilted Receipt Paper Preview */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute -left-10 -bottom-12 w-48 h-48 rounded-full bg-sky-400/15 blur-3xl group-hover:bg-sky-400/25 transition-colors"
-          />
-
-          {/* Left: Info & Pill CTA */}
-          <div className="relative z-10 flex flex-col justify-between gap-4 min-w-0 flex-1">
-            <div className="space-y-3">
-              <span className="w-11 h-11 rounded-[14px] bg-sky-500/25 border border-sky-300/40 text-sky-200 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_8px_20px_rgba(56,189,248,0.22)]">
-                <Receipt className="w-5 h-5" strokeWidth={1.9} />
-              </span>
-
-              <div>
-                <h2 className="font-display text-xl sm:text-2xl font-bold tracking-tight text-white">
-                  Slip Nocty
-                </h2>
-                <p className="mt-1 text-xs sm:text-sm text-white/65">
-                  Struk musik 9:16 &amp; barcode scan
-                </p>
-              </div>
-            </div>
-
-            <div>
-              <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-[#0B0B0D] text-xs font-semibold shadow-[0_6px_20px_rgba(255,255,255,0.25)] group-hover:scale-[1.02] transition-transform whitespace-nowrap">
-                <span>Buat Slip</span>
-                <ArrowUpRight className="w-3.5 h-3.5" strokeWidth={2.2} />
-              </span>
-            </div>
-          </div>
-
-          {/* Right: Mini Visual Receipt Paper & Code 128 Barcode Preview */}
-          <div
-            aria-hidden="true"
-            className="on-artwork relative z-10 w-[114px] sm:w-[142px] shrink-0 rotate-[3deg] group-hover:rotate-[1deg] group-hover:scale-[1.03] transition-transform duration-300"
+            className="on-artwork relative mx-auto sm:mx-0 w-[200px] sm:w-[210px] shrink-0 -rotate-[2.5deg] group-hover:rotate-0 group-hover:-translate-y-1 transition-all duration-300 ease-out"
           >
             <div
-              className="rounded-xl p-2.5 sm:p-3 shadow-[0_14px_30px_rgba(0,0,0,0.48)] border border-black/10"
+              className="rounded-sm px-4 py-4 shadow-[0_28px_60px_rgba(0,0,0,0.85),0_8px_20px_rgba(0,0,0,0.5)] border border-black/10"
               style={{
-                backgroundColor: '#F7F5EE',
-                color: '#16161A',
+                backgroundColor: '#F5F3EC',
+                color: '#141418',
               }}
             >
-              <div className="flex items-center justify-between border-b border-dashed border-black/20 pb-1.5">
-                <span className="font-mono-tabular text-[8px] sm:text-[9px] font-bold tracking-wider uppercase">
-                  NOCTY SLIP
+              <div className="flex items-center justify-between border-b border-dashed border-black/25 pb-2">
+                <span className="font-mono-tabular text-[10px] font-bold tracking-[0.18em] uppercase">
+                  NOCTY
                 </span>
-                <span className="font-mono-tabular text-[7px] opacity-60">9:16</span>
+                <span className="font-mono-tabular text-[9px] tracking-wider opacity-60">
+                  SLIP · 9:16
+                </span>
               </div>
 
-              <div className="mt-2 space-y-1.5 font-mono-tabular text-[7.5px] sm:text-[8.5px]">
-                <div className="flex items-center justify-between gap-1">
-                  <span className="truncate font-semibold">
-                    01 {currentTrack?.title || 'Lofi Midnight'}
-                  </span>
-                  <span className="opacity-65 shrink-0">3:24</span>
-                </div>
-                <div className="flex items-center justify-between gap-1 opacity-75">
-                  <span className="truncate">02 Velvet Echo</span>
-                  <span className="shrink-0">2:58</span>
-                </div>
-                <div className="flex items-center justify-between gap-1 opacity-60">
-                  <span className="truncate">03 Starlight</span>
-                  <span className="shrink-0">4:10</span>
-                </div>
+              <div className="mt-3 space-y-2 font-mono-tabular text-[10px]">
+                {previewTracks.map((item, idx) => (
+                  <div key={idx} className="flex items-baseline justify-between gap-2">
+                    <span className="truncate font-medium">
+                      0{idx + 1} {item.title}
+                    </span>
+                    <span className="opacity-65 shrink-0">
+                      {formatDuration(item.duration || 180)}
+                    </span>
+                  </div>
+                ))}
               </div>
 
-              <div className="mt-2.5 pt-1.5 border-t border-dashed border-black/20">
-                <div className="flex items-end justify-between h-5 sm:h-6 gap-[1.5px] px-0.5">
-                  {MINI_BARCODE_WIDTHS.map((w, idx) => (
+              <div className="mt-3 pt-2 border-t border-dashed border-black/25 flex items-center justify-between font-mono-tabular text-[9.5px]">
+                <span className="uppercase tracking-wider opacity-65">TOTAL</span>
+                <span className="font-semibold">{formatDuration(totalSec)}</span>
+              </div>
+
+              <div className="mt-3 pt-2.5 border-t border-black/15">
+                <div className="flex items-end justify-between h-8 gap-[1.5px]">
+                  {BARCODE_PATTERN.map((w, idx) => (
                     <span
                       key={idx}
-                      className="h-full rounded-[0.5px]"
+                      className="h-full"
                       style={{
                         width: `${w}px`,
                         backgroundColor: '#141418',
@@ -135,96 +99,79 @@ export const StudioView: React.FC = () => {
                     />
                   ))}
                 </div>
-                <p className="mt-1 text-center font-mono-tabular text-[6.5px] tracking-[0.22em] opacity-65">
-                  NOCTY-8241
+                <p className="mt-1.5 text-center font-mono-tabular text-[8px] tracking-[0.26em] opacity-70">
+                  NCT-0194-882
                 </p>
               </div>
             </div>
           </div>
+
+          {/* Editorial Copy & Minimal Action */}
+          <div className="flex-1 space-y-3 text-center sm:text-left">
+            <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-white">
+              Slip Nocty
+            </h2>
+            <p className="text-sm text-zinc-400 leading-relaxed">
+              Cetak kartu struk musik 9:16 siap bagikan lengkap dengan barcode yang bisa dipindai.
+            </p>
+            <div className="pt-1">
+              <span className="inline-flex items-center gap-1.5 text-sm font-medium text-white group-hover:translate-x-1 transition-transform">
+                <span>Buka Editor</span>
+                <ArrowUpRight className="w-4 h-4 text-zinc-400 group-hover:text-white transition-colors" strokeWidth={2} />
+              </span>
+            </div>
+          </div>
+        </button>
+      </section>
+
+      {/* 3. Secondary Editorial Hairline List (No boxes, no colored icons, no neon badges) */}
+      <section aria-label="Fitur Studio Lainnya" className="border-t border-white/[0.08]">
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic(12);
+            setIsTwinModalOpen(true);
+          }}
+          className="group w-full py-5 border-b border-white/[0.08] flex items-center justify-between gap-4 text-left hover:bg-white/[0.02] px-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+        >
+          <div className="space-y-1">
+            <h3 className="font-display text-lg font-semibold tracking-tight text-white">
+              Nocty Twin
+            </h3>
+            <p className="text-sm text-zinc-400 leading-snug">
+              Dengarkan lagu secara sinkron bersama teman dalam satu sesi real-time
+            </p>
+          </div>
+          <ChevronRight
+            className="w-5 h-5 text-zinc-500 group-hover:text-white group-hover:translate-x-0.5 transition-all shrink-0"
+            strokeWidth={1.85}
+          />
         </button>
 
-        {/* Bottom 2-Column Bento Grid: Nocty Twin & Aura & Kartu */}
-        <div className="grid grid-cols-2 gap-3.5">
-          {/* Left Column: Nocty Twin */}
-          <button
-            type="button"
-            onClick={() => {
-              triggerHaptic(12);
-              setIsTwinModalOpen(true);
-            }}
-            className="group relative overflow-hidden rounded-[28px] bg-white/[0.07] hover:bg-white/[0.11] backdrop-blur-3xl backdrop-saturate-150 saturate-150 border border-white/[0.18] p-4 sm:p-5 text-left shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),0_12px_28px_rgba(0,0,0,0.4)] transition-all duration-200 active:scale-[0.98] flex flex-col justify-between gap-5 min-h-[168px] sm:min-h-[184px]"
-          >
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent"
-            />
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute -right-8 -top-8 w-28 h-28 rounded-full bg-rose-500/20 blur-2xl group-hover:bg-rose-500/30 transition-colors"
-            />
-
-            <div className="relative z-10 flex items-start justify-between gap-2">
-              <span className="w-11 h-11 rounded-[14px] bg-gradient-to-br from-rose-500/35 to-pink-500/20 border border-rose-300/40 text-rose-200 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.38),0_8px_22px_rgba(244,63,94,0.35)] shrink-0">
-                <Heart className="w-5 h-5 fill-rose-300/80" strokeWidth={1.9} />
-              </span>
-
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-400/15 backdrop-blur-md border border-rose-300/35 text-[11px] font-semibold text-rose-100 whitespace-nowrap">
-                <Radio className="w-3 h-3" strokeWidth={2.2} />
-                <span>Live</span>
-              </span>
-            </div>
-
-            <div className="relative z-10">
-              <h2 className="font-display text-base sm:text-lg font-bold text-white truncate">
-                Nocty Twin
-              </h2>
-              <p className="mt-0.5 text-xs text-white/65 truncate">
-                Dengar bareng real-time
-              </p>
-            </div>
-          </button>
-
-          {/* Right Column: Aura & Kartu */}
-          <button
-            type="button"
-            onClick={() => {
-              triggerHaptic(12);
-              setIsWeeklyAuraOpen(true);
-            }}
-            className="group relative overflow-hidden rounded-[28px] bg-white/[0.07] hover:bg-white/[0.11] backdrop-blur-3xl backdrop-saturate-150 saturate-150 border border-white/[0.18] p-4 sm:p-5 text-left shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),0_12px_28px_rgba(0,0,0,0.4)] transition-all duration-200 active:scale-[0.98] flex flex-col justify-between gap-5 min-h-[168px] sm:min-h-[184px]"
-          >
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent"
-            />
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute -right-8 -top-8 w-28 h-28 rounded-full bg-indigo-500/22 blur-2xl group-hover:bg-indigo-500/32 transition-colors"
-            />
-
-            <div className="relative z-10 flex items-start justify-between gap-2">
-              <span className="w-11 h-11 rounded-[14px] bg-gradient-to-br from-indigo-500/35 to-violet-500/20 border border-indigo-300/40 text-indigo-200 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.38),0_8px_22px_rgba(99,102,241,0.38)] shrink-0">
-                <Sparkles className="w-5 h-5" strokeWidth={1.9} />
-              </span>
-
-              <ArrowUpRight
-                className="w-4 h-4 text-white/45 group-hover:text-white group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all shrink-0 mt-1"
-                strokeWidth={2}
-              />
-            </div>
-
-            <div className="relative z-10">
-              <h2 className="font-display text-base sm:text-lg font-bold text-white truncate">
-                Aura &amp; Kartu
-              </h2>
-              <p className="mt-0.5 text-xs text-white/65 truncate">
-                Raport suasana hati 9:16
-              </p>
-            </div>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic(12);
+            setIsWeeklyAuraOpen(true);
+          }}
+          className="group w-full py-5 border-b border-white/[0.08] flex items-center justify-between gap-4 text-left hover:bg-white/[0.02] px-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+        >
+          <div className="space-y-1">
+            <h3 className="font-display text-lg font-semibold tracking-tight text-white">
+              Weekly Aura
+            </h3>
+            <p className="text-sm text-zinc-400 leading-snug">
+              Ringkasan suasana hati mingguan dan poster musik 9:16
+            </p>
+          </div>
+          <ChevronRight
+            className="w-5 h-5 text-zinc-500 group-hover:text-white group-hover:translate-x-0.5 transition-all shrink-0"
+            strokeWidth={1.85}
+          />
+        </button>
       </section>
     </div>
   );
 };
+
 

@@ -252,7 +252,7 @@ export const ExploreView: React.FC = () => {
             }}
             placeholder="Ketik judul, artis, atau lirik..."
             aria-label="Cari lagu, artis, atau lirik"
-            className="w-full h-11 pl-11 pr-10 rounded-full bg-white/[0.07] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.28)] text-sm text-white placeholder-white/45 focus:outline-none focus:border-white/30"
+            className="w-full h-11 pl-11 pr-10 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] text-sm text-white placeholder-zinc-400 focus:outline-none focus:border-white/25"
           />
           {searchQuery && (
             <button
@@ -280,8 +280,8 @@ export const ExploreView: React.FC = () => {
                 }}
                 className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${
                   selected
-                    ? 'bg-white text-[#0B0B0D] shadow-[0_6px_18px_rgba(255,255,255,0.22)]'
-                    : 'bg-white/[0.07] hover:bg-white/[0.14] backdrop-blur-2xl text-white/85 hover:text-white border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.22)]'
+                    ? 'bg-white text-[#0B0B0D]'
+                    : 'bg-white/[0.04] hover:bg-white/[0.08] backdrop-blur-2xl text-zinc-300 hover:text-white border border-white/[0.08]'
                 }`}
               >
                 {channel.label}

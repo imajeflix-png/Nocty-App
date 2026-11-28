@@ -74,18 +74,11 @@ export const LibraryView: React.FC = () => {
       <button
         type="button"
         onClick={() => setIsStudioSheetOpen(true)}
-        className="group relative w-full overflow-hidden rounded-[28px] bg-white/[0.07] hover:bg-white/[0.11] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] p-5 text-left transition-all"
+        className="group relative w-full overflow-hidden rounded-2xl bg-white/[0.04] hover:bg-white/[0.07] backdrop-blur-2xl border border-white/[0.08] p-5 text-left transition-all"
       >
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute -right-12 -top-12 w-56 h-56 rounded-full blur-3xl opacity-35 transition-opacity group-hover:opacity-50"
-          style={{
-            background: `radial-gradient(circle, rgba(${weeklyReport.auraPalette.primary.r}, ${weeklyReport.auraPalette.primary.g}, ${weeklyReport.auraPalette.primary.b}, 0.9), transparent 70%)`,
-          }}
-        />
         <div className="relative z-10 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3.5 min-w-0">
-            <span className="w-12 h-12 rounded-2xl bg-white/12 border border-white/[0.18] flex items-center justify-center shrink-0">
+            <span className="w-12 h-12 rounded-2xl bg-white/[0.06] border border-white/[0.10] flex items-center justify-center shrink-0">
               <AppleEmoji unified="2728" size={22} />
             </span>
             <div className="min-w-0">
@@ -108,7 +101,7 @@ export const LibraryView: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveView('liked')}
-          className="flex items-center justify-between gap-4 p-4 rounded-3xl bg-white/[0.06] hover:bg-white/[0.10] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.3),0_10px_28px_rgba(0,0,0,0.4)] transition-all text-left"
+          className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.04] hover:bg-white/[0.07] backdrop-blur-2xl border border-white/[0.08] transition-all text-left"
         >
           <div className="flex items-center gap-3.5 min-w-0">
             <span className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
@@ -129,7 +122,7 @@ export const LibraryView: React.FC = () => {
             key={pl.id}
             type="button"
             onClick={() => openPlaylist(pl.id)}
-            className="flex items-center justify-between gap-4 p-4 rounded-3xl bg-white/[0.06] hover:bg-white/[0.10] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.3),0_10px_28px_rgba(0,0,0,0.4)] transition-all text-left"
+            className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.04] hover:bg-white/[0.07] backdrop-blur-2xl border border-white/[0.08] transition-all text-left"
           >
             <div className="flex items-center gap-3.5 min-w-0">
               <span className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center shrink-0">

@@ -2,16 +2,16 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --bg-canvas: #0b0b0d;
+  --bg-canvas: #08080a;
   --text-primary: #f5f5f7;
-  --glass-surface: rgba(255, 255, 255, 0.05);
-  --glass-surface-hover: rgba(255, 255, 255, 0.09);
+  --glass-surface: rgba(255, 255, 255, 0.04);
+  --glass-surface-hover: rgba(255, 255, 255, 0.08);
   --glass-border: rgba(255, 255, 255, 0.08);
-  --ambient-rgb: 148, 163, 184;
-  --ambient-secondary-rgb: 99, 102, 241;
-  --accent-hex: #94a3b8;
-  --accent-contrast: #0b0b0d;
-  --bg-gradient-intensity: 0.28;
+  --ambient-rgb: 161, 161, 170;
+  --ambient-secondary-rgb: 82, 82, 91;
+  --accent-hex: #a1a1aa;
+  --accent-contrast: #08080a;
+  --bg-gradient-intensity: 0.16;
   --font-display: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   --font-sans: 'DM Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
@@ -76,17 +76,20 @@ html.light ::-webkit-scrollbar-thumb:hover {
 }
 
 /* Apple Light Glassmorphism: legible contrast across panels, cards, modals, and controls */
+html.light .bg-\[\#08080A\],
 html.light .bg-\[\#0B0B0D\] {
   background-color: #f2f4f8;
 }
+html.light .bg-\[\#08080A\]\/80,
 html.light .bg-\[\#0B0B0D\]\/45,
 html.light .bg-white\/\[0\.04\] {
-  background-color: rgba(255, 255, 255, 0.62);
+  background-color: rgba(255, 255, 255, 0.65);
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.05);
 }
 html.light .bg-\[\#0B0B0D\]\/80 {
   background-color: rgba(246, 248, 252, 0.88);
 }
+html.light .bg-\[\#121215\]\/80,
 html.light .bg-\[\#121216\]\/75,
 html.light .bg-\[\#121216\]\/88,
 html.light .bg-\[\#121216\]\/90,
@@ -96,7 +99,7 @@ html.light .bg-\[\#141418\]\/90,
 html.light .bg-\[\#16161B\]\/90,
 html.light .bg-\[\#18181D\]\/85,
 html.light .bg-\[\#18181D\]\/92 {
-  background-color: rgba(255, 255, 255, 0.86);
+  background-color: rgba(255, 255, 255, 0.88);
   box-shadow: 0 24px 64px rgba(15, 23, 42, 0.14);
 }
 html.light .bg-\[\#141418\] {

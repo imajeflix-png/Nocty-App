@@ -3531,10 +3531,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ))}
       </div>
 
-      {/* Layer 0: Subtle Soft Ambient Music Video + Frosted Glass Overlay behind Home / Explore / Library */}
+      {/* Layer 0: Neutral #08080A Canvas + Optional Subtle Album-Derived Tint / MV */}
       <div
         aria-hidden="true"
-        className="fixed inset-0 z-0 pointer-events-none overflow-hidden bg-[#F2F4F8] dark:bg-[#0B0B0D] transition-colors duration-300"
+        className="fixed inset-0 z-0 pointer-events-none overflow-hidden bg-[#F2F4F8] dark:bg-[#08080A] transition-colors duration-300"
       >
         {showHomeAmbientVideo && ambientVideoId && (
           <iframe
@@ -3551,19 +3551,19 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             showHomeAmbientVideo
               ? resolvedTheme === 'light'
                 ? 'bg-[#F2F4F8]/78 backdrop-blur-md'
-                : 'bg-[#0B0B0D]/75 backdrop-blur-md'
+                : 'bg-[#08080A]/80 backdrop-blur-md'
               : 'blur-3xl'
           }`}
           style={
-            !showHomeAmbientVideo
+            !showHomeAmbientVideo && currentTrack
               ? {
                   opacity:
                     resolvedTheme === 'light'
-                      ? Math.min(0.5, ambientPalette.gradientIntensity * 0.9)
-                      : Math.min(0.62, ambientPalette.gradientIntensity),
+                      ? Math.min(0.24, ambientPalette.gradientIntensity * 0.4)
+                      : Math.min(0.28, ambientPalette.gradientIntensity * 0.45),
                   background: `
-                    radial-gradient(circle at 20% 15%, rgba(${ambientPalette.primary.r}, ${ambientPalette.primary.g}, ${ambientPalette.primary.b}, 0.65) 0%, transparent 58%),
-                    radial-gradient(circle at 82% 78%, rgba(${ambientPalette.secondary.r}, ${ambientPalette.secondary.g}, ${ambientPalette.secondary.b}, 0.55) 0%, transparent 58%)
+                    radial-gradient(circle at 22% 18%, rgba(${ambientPalette.primary.r}, ${ambientPalette.primary.g}, ${ambientPalette.primary.b}, 0.55) 0%, transparent 55%),
+                    radial-gradient(circle at 80% 78%, rgba(${ambientPalette.secondary.r}, ${ambientPalette.secondary.g}, ${ambientPalette.secondary.b}, 0.45) 0%, transparent 55%)
                   `,
                 }
               : undefined

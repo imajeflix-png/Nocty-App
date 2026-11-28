@@ -30,13 +30,13 @@ import { IosLiquidGlassSwitch } from './IosLiquidGlassSwitch';
 type SquircleTone = 'blue' | 'purple' | 'green' | 'orange' | 'rose' | 'teal' | 'slate';
 
 const SQUIRCLE_TONE_CLASSES: Record<SquircleTone, string> = {
-  blue: 'bg-sky-500/25 border-sky-300/35 text-sky-200',
-  purple: 'bg-violet-500/25 border-violet-300/35 text-violet-200',
-  green: 'bg-emerald-500/25 border-emerald-300/35 text-emerald-200',
-  orange: 'bg-amber-500/25 border-amber-300/35 text-amber-200',
-  rose: 'bg-rose-500/25 border-rose-300/35 text-rose-200',
-  teal: 'bg-teal-500/25 border-teal-300/35 text-teal-200',
-  slate: 'bg-white/15 border-white/25 text-white/90',
+  blue: 'bg-white/[0.06] border-white/[0.10] text-white/85',
+  purple: 'bg-white/[0.06] border-white/[0.10] text-white/85',
+  green: 'bg-white/[0.06] border-white/[0.10] text-white/85',
+  orange: 'bg-white/[0.06] border-white/[0.10] text-white/85',
+  rose: 'bg-white/[0.06] border-white/[0.10] text-white/85',
+  teal: 'bg-white/[0.06] border-white/[0.10] text-white/85',
+  slate: 'bg-white/[0.06] border-white/[0.10] text-white/85',
 };
 
 const IosSquircleIcon: React.FC<{ tone: SquircleTone; children: React.ReactNode }> = ({
@@ -44,7 +44,7 @@ const IosSquircleIcon: React.FC<{ tone: SquircleTone; children: React.ReactNode 
   children,
 }) => (
   <span
-    className={`w-8 h-8 rounded-[10px] border flex items-center justify-center shrink-0 backdrop-blur-md shadow-[inset_0_1px_0_0_rgba(255,255,255,0.28)] ${SQUIRCLE_TONE_CLASSES[tone]}`}
+    className={`w-8 h-8 rounded-[10px] border flex items-center justify-center shrink-0 backdrop-blur-md ${SQUIRCLE_TONE_CLASSES[tone]}`}
   >
     {children}
   </span>
@@ -101,7 +101,6 @@ export const SettingsView: React.FC = () => {
     cycleThemeMode,
     isDynamicThemeSync,
     toggleDynamicThemeSync,
-    ambientPalette,
     pushToast,
   } = usePlayer();
 
@@ -112,8 +111,6 @@ export const SettingsView: React.FC = () => {
     syncBrowserPermissions();
     refreshCacheEstimate();
   }, [syncBrowserPermissions, refreshCacheEstimate]);
-
-  const { primary, secondary } = ambientPalette;
 
   const handleOpenSystemSettings = async () => {
     const result = await openSystemSettings();
@@ -198,18 +195,6 @@ export const SettingsView: React.FC = () => {
 
   return (
     <div className="relative max-w-3xl mx-auto pb-44 lg:pb-12 space-y-7">
-      {/* Ambient Liquid Glass Depth Glow behind Settings Cards */}
-      <div
-        aria-hidden="true"
-        className="ambient-aura-layer pointer-events-none absolute -top-12 inset-x-0 h-80 blur-3xl opacity-35"
-        style={{
-          background: `
-            radial-gradient(circle at 18% 25%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.85) 0%, transparent 62%),
-            radial-gradient(circle at 82% 65%, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.78) 0%, transparent 62%)
-          `,
-        }}
-      />
-
       {/* iOS Settings Header */}
       <div className="relative z-10 flex items-center justify-between gap-3 pt-1">
         <div className="flex items-center gap-3 min-w-0">
@@ -217,7 +202,7 @@ export const SettingsView: React.FC = () => {
             type="button"
             onClick={() => setActiveView('home')}
             aria-label="Kembali ke Beranda"
-            className="min-w-[40px] min-h-[40px] rounded-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.14] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2)] flex items-center justify-center text-white/85 hover:text-white transition-colors shrink-0"
+            className="min-w-[40px] min-h-[40px] rounded-full bg-white/[0.04] hover:bg-white/[0.09] border border-white/[0.08] flex items-center justify-center text-white/85 hover:text-white transition-colors shrink-0"
           >
             <ChevronLeft className="w-5 h-5" strokeWidth={2} />
           </button>
@@ -239,7 +224,7 @@ export const SettingsView: React.FC = () => {
         </h2>
         <div className="space-y-2.5">
           {/* 1. Notifikasi & Kontrol Media */}
-          <div className="rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] space-y-2.5">
+          <div className="rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5 space-y-2.5">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3.5 min-w-0 flex-1">
                 <IosSquircleIcon tone="blue">
@@ -279,7 +264,7 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {/* 2. Pemutaran Latar Belakang & Layar Kunci */}
-          <div className="flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)]">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5">
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="purple">
                 <Smartphone className="w-4 h-4" strokeWidth={2} />
@@ -306,7 +291,7 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {/* 3. Izin Galeri & Penyimpanan */}
-          <div className="flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)]">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5">
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="green">
                 <ImageIcon className="w-4 h-4" strokeWidth={2} />
@@ -337,7 +322,7 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {/* 4. Izin Kamera & Pemindai */}
-          <div className="rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] space-y-2.5">
+          <div className="rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5 space-y-2.5">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3.5 min-w-0 flex-1">
                 <IosSquircleIcon tone="orange">
@@ -377,7 +362,7 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {/* 5. Haptic Feedback */}
-          <div className="flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)]">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5">
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="teal">
                 <Vibrate className="w-4 h-4" strokeWidth={2} />
@@ -408,7 +393,7 @@ export const SettingsView: React.FC = () => {
         </h2>
         <div className="space-y-2.5">
           {/* Adaptive Smart Network Mode */}
-          <div className="flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)]">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5">
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="teal">
                 <Wifi className="w-4 h-4" strokeWidth={2} />
@@ -430,7 +415,7 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {/* Auto-Play Lagu Berikutnya */}
-          <div className="flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)]">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5">
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="green">
                 <ListMusic className="w-4 h-4" strokeWidth={2} />
@@ -452,7 +437,7 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {/* Mode Video / MV Background */}
-          <div className="flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)]">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5">
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="purple">
                 <Film className="w-4 h-4" strokeWidth={2} />
@@ -474,7 +459,7 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {/* Dynamic Island Pill & Overlay */}
-          <div className="rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] space-y-2.5">
+          <div className="rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5 space-y-2.5">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3.5 min-w-0 flex-1">
                 <IosSquircleIcon tone="purple">
@@ -517,7 +502,7 @@ export const SettingsView: React.FC = () => {
           <button
             type="button"
             onClick={cycleThemeMode}
-            className="w-full flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] hover:bg-white/[0.10] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] text-left transition-colors"
+            className="w-full flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.07] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5 text-left transition-colors"
           >
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="blue">
@@ -543,7 +528,7 @@ export const SettingsView: React.FC = () => {
           </button>
 
           {/* Sinkron Warna Album */}
-          <div className="flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)]">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5">
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="rose">
                 <Palette className="w-4 h-4" strokeWidth={2} />
@@ -571,7 +556,7 @@ export const SettingsView: React.FC = () => {
         </h2>
         <div className="space-y-2.5">
           {/* Notifikasi Nocty Twin & Tap Heart */}
-          <div className="flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)]">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5">
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="rose">
                 <HeartHandshake className="w-4 h-4" strokeWidth={2} />
@@ -593,7 +578,7 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {/* Auto-Vibe Slip Nocty */}
-          <div className="flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)]">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5">
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="purple">
                 <Sparkles className="w-4 h-4" strokeWidth={2} />
@@ -625,7 +610,7 @@ export const SettingsView: React.FC = () => {
             type="button"
             disabled={isClearingCache}
             onClick={handleClearCache}
-            className="w-full flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] hover:bg-white/[0.10] active:bg-white/[0.12] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] text-left disabled:opacity-50 transition-colors"
+            className="w-full flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.07] active:bg-white/[0.09] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5 text-left disabled:opacity-50 transition-colors"
           >
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="orange">
@@ -652,7 +637,7 @@ export const SettingsView: React.FC = () => {
           <button
             type="button"
             onClick={handleInstallPwa}
-            className="w-full flex items-center justify-between gap-3 rounded-3xl bg-white/[0.06] hover:bg-white/[0.10] active:bg-white/[0.12] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] text-left transition-colors"
+            className="w-full flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.07] active:bg-white/[0.09] backdrop-blur-2xl border border-white/[0.08] px-4 py-3.5 text-left transition-colors"
           >
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
               <IosSquircleIcon tone="blue">
@@ -674,7 +659,7 @@ export const SettingsView: React.FC = () => {
           </button>
 
           {/* Tentang Nocty */}
-          <div className="rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] overflow-hidden">
+          <div className="rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] overflow-hidden">
             <button
               type="button"
               onClick={() => setIsAboutExpanded((v) => !v)}

@@ -623,10 +623,10 @@ export function buildAmbientPalette(
 }
 
 export const DEFAULT_AMBIENT_PALETTE: AmbientPalette = buildAmbientPalette(
-  { r: 148, g: 163, b: 184, hex: '#94A3B8' },
-  { r: 99, g: 102, b: 241, hex: '#6366F1' },
-  0.24,
-  0.42
+  { r: 161, g: 161, b: 170, hex: '#A1A1AA' },
+  { r: 82, g: 82, b: 91, hex: '#52525B' },
+  0.12,
+  0.22
 );
 
 const FALLBACK_PALETTES: AmbientPalette[] = [

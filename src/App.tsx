@@ -28,7 +28,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { useTabSwipeNavigation } from './hooks/useTabSwipeNavigation';
 
 const NoctyShell: React.FC = () => {
-  const { activeView, setActiveView, isZenMode, ambientPalette, toasts } = usePlayer();
+  const { activeView, setActiveView, isZenMode, currentTrack, ambientPalette, toasts } = usePlayer();
   const { primary, secondary, gradientIntensity } = ambientPalette;
   const mainScrollRef = useRef<HTMLElement | null>(null);
   const { touchHandlers, contentStyle } = useTabSwipeNavigation({
@@ -40,61 +40,36 @@ const NoctyShell: React.FC = () => {
 
   return (
     <div className="relative z-10 h-screen w-screen overflow-hidden bg-transparent text-[#111318] dark:text-[#F5F5F7] flex flex-col">
-      {/* Global Cover-Adaptive Ambient Light Orbs for iOS 26 Liquid Glass Refraction */}
-      <div aria-hidden="true" className="ambient-aura-layer pointer-events-none fixed inset-0 overflow-hidden z-0">
-        {/* Orb 1: Indigo Purple blended with active cover primary */}
-        <div
-          className="animate-orb-pulse absolute -top-36 -left-24 w-[68vw] h-[68vw] max-w-[780px] max-h-[780px] rounded-full blur-[120px] opacity-35 transition-colors duration-1000"
-          style={{
-            background: `radial-gradient(circle, rgba(${Math.round(primary.r * 0.6 + 99 * 0.4)}, ${Math.round(primary.g * 0.6 + 102 * 0.4)}, ${Math.round(primary.b * 0.6 + 241 * 0.4)}, 0.95) 0%, rgba(79, 70, 229, 0.55) 45%, transparent 72%)`,
-          }}
-        />
-        {/* Orb 2: Midnight Blue blended with active cover secondary */}
-        <div
-          className="animate-orb-pulse absolute top-1/4 -right-28 w-[62vw] h-[62vw] max-w-[720px] max-h-[720px] rounded-full blur-[120px] opacity-35 transition-colors duration-1000"
-          style={{
-            animationDelay: '3s',
-            background: `radial-gradient(circle, rgba(${Math.round(secondary.r * 0.55 + 37 * 0.45)}, ${Math.round(secondary.g * 0.55 + 99 * 0.45)}, ${Math.round(secondary.b * 0.55 + 235 * 0.45)}, 0.92) 0%, rgba(30, 58, 138, 0.65) 48%, transparent 72%)`,
-          }}
-        />
-        {/* Orb 3: Dim Crimson blended with active cover accent */}
-        <div
-          className="animate-orb-pulse absolute -bottom-36 left-1/4 w-[58vw] h-[58vw] max-w-[680px] max-h-[680px] rounded-full blur-[120px] opacity-35 transition-colors duration-1000"
-          style={{
-            animationDelay: '6s',
-            background: `radial-gradient(circle, rgba(${Math.round(primary.r * 0.45 + 190 * 0.55)}, ${Math.round(primary.g * 0.45 + 24 * 0.55)}, ${Math.round(primary.b * 0.45 + 93 * 0.55)}, 0.85) 0%, rgba(136, 19, 55, 0.55) 48%, transparent 72%)`,
-          }}
-        />
-      </div>
-
       {/* Minimal Top Bar */}
       <div className="relative z-10 shrink-0">
         <TopBar />
       </div>
 
-      {/* Airy iOS 26 Liquid Glass Workspace */}
+      {/* Neutral Monochromatic Smoke Glass Workspace */}
       <div className="relative z-10 flex-1 min-h-0 flex gap-3 px-3 pb-0 lg:pb-3">
-        {/* Compact Frosted Glass Left Sidebar */}
+        {/* Compact Smoke Glass Left Sidebar */}
         <Sidebar />
 
-        {/* Spacious Crystal Liquid Glass Main View */}
+        {/* Spacious Monochromatic Smoke Glass Main View */}
         <main
           ref={mainScrollRef}
           {...touchHandlers}
-          className="relative flex-1 min-w-0 h-full rounded-[28px] bg-white/[0.03] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.14] shadow-[inset_0_1px_1px_rgba(255,255,255,0.22),0_12px_32px_rgba(0,0,0,0.4)] overflow-y-auto overflow-x-hidden touch-pan-y scroll-pt-8"
+          className="relative flex-1 min-w-0 h-full rounded-[24px] bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] overflow-y-auto overflow-x-hidden touch-pan-y scroll-pt-8"
         >
-          {/* Soft Cover-Adaptive Ambient Aura inside Main View */}
-          <div
-            aria-hidden="true"
-            className="ambient-aura-layer pointer-events-none absolute -top-24 inset-x-0 h-[400px] blur-[100px] transition-all duration-1000"
-            style={{
-              opacity: Math.min(0.45, Math.max(0.28, gradientIntensity * 0.85)),
-              background: `
-                radial-gradient(ellipse 65% 60% at 22% 15%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.9) 0%, transparent 72%),
-                radial-gradient(ellipse 55% 55% at 78% 10%, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.85) 0%, transparent 70%)
-              `,
-            }}
-          />
+          {/* Quiet Artwork-Only Ambient Depth (zero hardcoded purple/neon fallbacks) */}
+          {currentTrack && (
+            <div
+              aria-hidden="true"
+              className="ambient-aura-layer pointer-events-none absolute -top-28 inset-x-0 h-[340px] blur-[110px] transition-all duration-1000"
+              style={{
+                opacity: Math.min(0.24, gradientIntensity * 0.45),
+                background: `
+                  radial-gradient(ellipse 60% 55% at 24% 12%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.85) 0%, transparent 72%),
+                  radial-gradient(ellipse 50% 50% at 78% 10%, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.75) 0%, transparent 70%)
+                `,
+              }}
+            />
+          )}
 
           <div
             style={contentStyle}
@@ -150,7 +125,7 @@ const NoctyShell: React.FC = () => {
           {toasts.map((toast) => (
             <div
               key={toast.id}
-              className="px-4 py-2.5 rounded-2xl text-xs font-medium bg-white/[0.09] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.20] text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] transition-all"
+              className="px-4 py-2.5 rounded-xl text-xs font-medium bg-[#121215]/85 backdrop-blur-2xl border border-white/[0.08] text-white shadow-2xl transition-all"
             >
               {toast.text}
             </div>

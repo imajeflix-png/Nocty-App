@@ -35,7 +35,7 @@ export const Sidebar: React.FC = () => {
   return (
     <aside
       aria-label="Navigasi Utama"
-      className="hidden lg:flex w-[248px] shrink-0 rounded-[28px] bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] flex-col overflow-hidden select-none"
+      className="hidden lg:flex w-[248px] shrink-0 rounded-[24px] bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] flex-col overflow-hidden select-none"
     >
       {/* Primary Navigation */}
       <nav className="p-3 space-y-1">
