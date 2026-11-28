@@ -14,6 +14,7 @@ interface TrackRowProps {
   lyricSnippet?: string;
   playlistIdContext?: string;
   preserveQueueOrder?: boolean;
+  isSearchResult?: boolean;
 }
 
 export const TrackRow: React.FC<TrackRowProps> = ({
@@ -23,27 +24,30 @@ export const TrackRow: React.FC<TrackRowProps> = ({
   lyricSnippet,
   playlistIdContext,
   preserveQueueOrder = false,
+  isSearchResult = false,
 }) => {
   const { currentTrack, isPlaying, isBuffering, playTrack, toggleLike, isLiked } = usePlayer();
 
   const isActive = currentTrack?.id === track.id;
   const liked = isLiked(track.id);
 
+  const handleRowPlay = () => {
+    if (isSearchResult) {
+      playTrack(track, undefined, { fromSearch: true });
+      return;
+    }
+    playTrack(track, contextTracks, preserveQueueOrder ? { preserveOrder: true } : undefined);
+  };
+
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={() =>
-        playTrack(track, contextTracks, preserveQueueOrder ? { preserveOrder: true } : undefined)
-      }
+      onClick={handleRowPlay}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          playTrack(
-            track,
-            contextTracks,
-            preserveQueueOrder ? { preserveOrder: true } : undefined
-          );
+          handleRowPlay();
         }
       }}
       className={`group flex items-center gap-3.5 px-3 py-2.5 rounded-xl transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${

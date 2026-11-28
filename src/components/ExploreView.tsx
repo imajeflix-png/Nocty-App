@@ -305,6 +305,7 @@ export const ExploreView: React.FC = () => {
                 index={idx}
                 contextTracks={localSearchMatches.map((m) => m.track)}
                 lyricSnippet={snippet}
+                isSearchResult={Boolean(searchQuery.trim())}
               />
             ))}
           </div>
@@ -328,6 +329,7 @@ export const ExploreView: React.FC = () => {
                 index={idx}
                 contextTracks={lyricLibraryMatches.map((m) => m.track)}
                 lyricSnippet={snippet}
+                isSearchResult={true}
               />
             ))}
           </div>
@@ -399,6 +401,7 @@ export const ExploreView: React.FC = () => {
                 track={track}
                 index={idx}
                 contextTracks={onlineSearchResults}
+                isSearchResult={true}
               />
             ))}
           </div>

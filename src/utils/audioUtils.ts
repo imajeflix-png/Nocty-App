@@ -21,17 +21,64 @@ export interface SmartShuffleHistoryItem {
   durationListened?: number;
 }
 
-function getPrimaryArtistKey(artist: string): string {
+export function extractPrimaryArtistName(artist: string): string {
   return artist
-    .toLowerCase()
-    .replace(/\s*-\s*topic$/i, '')
-    .replace(/\s*vevo$/i, '')
+    .replace(/\s*-\s*Topic$/i, '')
+    .replace(/\s*VEVO$/i, '')
     .split(/,|&|\bfeat\.?\b|\bft\.?\b|\bwith\b|\bx\b/i)[0]
     .trim();
 }
 
+export function getPrimaryArtistKey(artist: string): string {
+  return extractPrimaryArtistName(artist).toLowerCase();
+}
+
 function getTrackMetaKey(artist: string, title: string): string {
   return `${getPrimaryArtistKey(artist)}::${title.toLowerCase().trim()}`;
+}
+
+export function collapseRepeatedChars(input: string): string {
+  return input.replace(/([a-z0-9])\1+/gi, '$1');
+}
+
+export function normalizeTypoSearchText(input: string): string {
+  return collapseRepeatedChars(
+    input
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+  )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Normalizes a song title cleanly so variants like "Janji Palsu", "Janji Palsu (Cover)",
+ * or "Janji Palsu - Live" map to the exact same canonical key.
+ */
+export function normalizeTitleKey(title: string): string {
+  return normalizeTypoSearchText(
+    title
+      .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+      .replace(/\s*[-–|]\s*(official|live|acoustic|akustik|cover|remix|koplo|version|versi|karaoke|lyrics?|lirik|audio).*$/i, '')
+  );
+}
+
+/**
+ * Produces a cleaned search query for upstream catalogs when user types repeated-letter typos
+ * (e.g. "janjji" -> "janji", "palsuu" -> "palsu", "hindiaa" -> "hindia") while preserving
+ * legitimate English double letters like "Billie", "Weeknd", "Espresso", "Good".
+ */
+export function getTypoQueryVariant(rawQuery: string): string {
+  const trimmed = rawQuery.trim();
+  if (!trimmed) return '';
+  let cleaned = trimmed.replace(/([a-z])\1{2,}/gi, '$1');
+  cleaned = cleaned.replace(/([aiu])\1+/gi, '$1');
+  cleaned = cleaned.replace(/([jkhqvwxyz])\1+/gi, '$1');
+  cleaned = cleaned.replace(/([bcdfghjklmnpqrstvwxyz])([bcdfghjklmnpqrstvwxyz])\2+/gi, '$1$2');
+  cleaned = cleaned.replace(/\b([a-z]*[aiueo])([dfgkmpqrvx])\2+\b/gi, '$1$2');
+  return cleaned.replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -507,6 +554,287 @@ export function mixTracksByMood(
   }
 
   return [anchorTrack, ...spacedSameMood, ...otherMood];
+}
+
+const VIBE_ARTIST_CLUSTERS: Array<{ members: string[]; peers: string[] }> = [
+  {
+    // Indie / Pop Alternatif Indonesia
+    members: [
+      'hindia',
+      '.feast',
+      'feast',
+      'nadin amizah',
+      'tulus',
+      'sal priadi',
+      'pamungkas',
+      'feby putri',
+      'kunto aji',
+      'reality club',
+      'fourtwnty',
+      'payung teduh',
+      'danilla',
+      'efek rumah kaca',
+      'barasuara',
+      'perunggu',
+      'the adams',
+      'ardhito pramono',
+      'nadhif basalamah',
+      'dere',
+      'idgitaf',
+    ],
+    peers: [
+      'Tulus',
+      'Nadin Amizah',
+      'Sal Priadi',
+      'Pamungkas',
+      'Feby Putri',
+      '.Feast',
+      'Hindia',
+      'Bernadya',
+      'Reality Club',
+      'Kunto Aji',
+    ],
+  },
+  {
+    // Pop Galau / Ballad Indonesia
+    members: [
+      'bernadya',
+      'mahalini',
+      'lyodra',
+      'tiara andini',
+      'rizky febian',
+      'juicy luicy',
+      'fabio asher',
+      'anggi marito',
+      'keisya levronka',
+      'ziva magnolya',
+      'raisa',
+      'yura yunita',
+      'afgan',
+      'rossa',
+      'judika',
+      'budi doremi',
+      'virgoun',
+      'last child',
+      'for revenge',
+      'fiersa besari',
+    ],
+    peers: [
+      'Bernadya',
+      'Mahalini',
+      'Tulus',
+      'Juicy Luicy',
+      'Lyodra',
+      'Tiara Andini',
+      'Nadin Amizah',
+      'Rizky Febian',
+      'Yura Yunita',
+      'Fabio Asher',
+    ],
+  },
+  {
+    // Band Pop / Rock Klasik Indonesia
+    members: [
+      'sheila on 7',
+      'dewa 19',
+      'dewa',
+      'noah',
+      'peterpan',
+      'padi',
+      'gigi',
+      'ungu',
+      'slank',
+      'nidji',
+      'ada band',
+      'letto',
+      'd masiv',
+      'samsons',
+      'kangen band',
+      'armada',
+      'wali',
+      'st12',
+      'kerispatih',
+    ],
+    peers: [
+      'Sheila On 7',
+      'Dewa 19',
+      'NOAH',
+      'Peterpan',
+      'Padi',
+      'Ungu',
+      'Nidji',
+      'Ada Band',
+      'Letto',
+      'D Masiv',
+    ],
+  },
+  {
+    // Dangdut / Koplo / Pop Jawa
+    members: [
+      'denny caknan',
+      'happy asmara',
+      'ndarboy genk',
+      'guyon waton',
+      'aftershine',
+      'gilga sahid',
+      'difarina indra',
+      'niken salindry',
+      'didi kempot',
+      'via vallen',
+      'nella kharisma',
+      'lesti',
+      'rhoma irama',
+    ],
+    peers: [
+      'Denny Caknan',
+      'Happy Asmara',
+      'Ndarboy Genk',
+      'Guyon Waton',
+      'Aftershine',
+      'Gilga Sahid',
+      'Didi Kempot',
+    ],
+  },
+  {
+    // K-Pop / K-R&B
+    members: [
+      'newjeans',
+      'bts',
+      'blackpink',
+      'bigbang',
+      'twice',
+      'seventeen',
+      'aespa',
+      'ive',
+      'stray kids',
+      'jungkook',
+      'iu',
+      'exo',
+      'nct',
+      'le sserafim',
+      'txt',
+      'enhypen',
+      'dean',
+      'crush',
+      'baekhyun',
+    ],
+    peers: [
+      'NewJeans',
+      'BTS',
+      'BLACKPINK',
+      'SEVENTEEN',
+      'TWICE',
+      'aespa',
+      'IVE',
+      'IU',
+      'BIGBANG',
+      'Stray Kids',
+    ],
+  },
+  {
+    // Western Indie / R&B / Lo-Fi / Bedroom Pop
+    members: [
+      'niki',
+      'rich brian',
+      'joji',
+      'sza',
+      'daniel caesar',
+      'frank ocean',
+      'keshi',
+      'clairo',
+      'laufey',
+      'cigarettes after sex',
+      'rex orange county',
+      'mac ayres',
+      'kali uchis',
+      'giveon',
+      'brent faiyaz',
+      'the marias',
+      'the marías',
+      'stephanie poetri',
+    ],
+    peers: [
+      'NIKI',
+      'Joji',
+      'SZA',
+      'Daniel Caesar',
+      'Keshi',
+      'Frank Ocean',
+      'Laufey',
+      'Clairo',
+      'Rex Orange County',
+      'Cigarettes After Sex',
+    ],
+  },
+  {
+    // Western Pop / Alt-Rock
+    members: [
+      'the weeknd',
+      'bruno mars',
+      'dua lipa',
+      'taylor swift',
+      'sabrina carpenter',
+      'billie eilish',
+      'olivia rodrigo',
+      'harry styles',
+      'ariana grande',
+      'lany',
+      'coldplay',
+      'arctic monkeys',
+      'radiohead',
+      'john mayer',
+      'oasis',
+      'maroon 5',
+      'post malone',
+      'ed sheeran',
+      'adele',
+      'sam smith',
+    ],
+    peers: [
+      'The Weeknd',
+      'Bruno Mars',
+      'LANY',
+      'Dua Lipa',
+      'Billie Eilish',
+      'Taylor Swift',
+      'Sabrina Carpenter',
+      'Coldplay',
+      'Arctic Monkeys',
+      'Harry Styles',
+    ],
+  },
+];
+
+/**
+ * Returns 6-8 genre & vibe-aligned companion artists for a given track,
+ * strictly excluding the track's own primary artist.
+ */
+export function getSimilarArtistsForTrack(track: Track): string[] {
+  const artistKey = getPrimaryArtistKey(track.artist);
+  const fullArtistLower = (track.artist || '').toLowerCase();
+
+  for (const cluster of VIBE_ARTIST_CLUSTERS) {
+    const matchesCluster = cluster.members.some(
+      (m) => artistKey === m || artistKey.includes(m) || fullArtistLower.includes(m)
+    );
+    if (matchesCluster) {
+      return cluster.peers
+        .filter((p) => getPrimaryArtistKey(p) !== artistKey)
+        .slice(0, 8);
+    }
+  }
+
+  const mood = detectTrackMood(track).mood;
+  const fallbackByMood: Record<TrackMoodId, string[]> = {
+    melancholic: ['Hindia', 'Tulus', 'Nadin Amizah', 'Bernadya', 'Sal Priadi', 'Pamungkas', 'Feby Putri', '.Feast'],
+    chill: ['Joji', 'SZA', 'Daniel Caesar', 'Keshi', 'Reality Club', 'Ardhito Pramono', 'Laufey', 'NIKI'],
+    upbeat: ['The Weeknd', 'Bruno Mars', 'LANY', 'Dua Lipa', 'NewJeans', 'Sheila On 7', 'Sabrina Carpenter'],
+    focus: ['Ludovico Einaudi', 'Yiruma', 'Joe Hisaishi', 'Nujabes', 'Max Richter', 'Nils Frahm'],
+  };
+
+  return fallbackByMood[mood]
+    .filter((p) => getPrimaryArtistKey(p) !== artistKey)
+    .slice(0, 8);
 }
 
 /**

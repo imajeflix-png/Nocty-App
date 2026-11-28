@@ -606,28 +606,39 @@ export const SlipNoctyModal: React.FC = () => {
 
   // Scaled geometry matching export 1080x1920 at exact 0.5x virtual coordinates (540x960)
   const { safeZone } = selectedTemplate;
-  const compactFactor =
-    templateId === 'denim-patches' ? 0.86 : templateId === 'editorial-basket' ? 0.92 : 0.96;
-  const metaSizePx = Math.round(9 * compactFactor);
-  const headerSizePx = Math.round(8 * compactFactor);
-  const trackSizePx = Math.round(10 * compactFactor);
-  const artistSizePx = Math.round(7.5 * compactFactor);
-  const footerSizePx = Math.round(8.5 * compactFactor);
-  const serialSizePx = Math.round(7.5 * compactFactor);
+  const virtualTypography =
+    templateId === 'denim-patches'
+      ? { meta: 12, header: 10.5, track: 14, artist: 11, duration: 12, footer: 12, serial: 10, gap: 5 }
+      : templateId === 'editorial-basket'
+        ? { meta: 12.5, header: 11, track: 15, artist: 11.5, duration: 12.5, footer: 12.5, serial: 10, gap: 6.5 }
+        : { meta: 13, header: 11.5, track: 16, artist: 12, duration: 13, footer: 13, serial: 10, gap: 7.5 };
+
+  const metaSizePx = virtualTypography.meta;
+  const headerSizePx = virtualTypography.header;
+  const trackSizePx = virtualTypography.track;
+  const artistSizePx = virtualTypography.artist;
+  const durationSizePx = virtualTypography.duration;
+  const footerSizePx = virtualTypography.footer;
+  const serialSizePx = virtualTypography.serial;
+  const trackRowGapPx = virtualTypography.gap;
   const barcodeHeightPx = selectedTemplate.barcodeHeightPx;
-  const padLeftPx = safeZone.padXPx ?? 10;
-  const padRightPx = safeZone.padRightPx ?? safeZone.padXPx ?? 10;
-  const padYPx = safeZone.padYPx ?? 4;
+  const padLeftPx = safeZone.padXPx ?? 9;
+  const padRightPx = safeZone.padRightPx ?? safeZone.padXPx ?? 9;
+  const padYPx = safeZone.padYPx ?? 3;
+  const noColWPx = Math.round(trackSizePx * 1.62);
+  const timeColWPx = Math.round(durationSizePx * 3.55);
 
   const zoneWVirtual = (safeZone.widthPct / 100) * VIRTUAL_STAGE_W;
   const zoneInnerWVirtual = zoneWVirtual - padLeftPx - padRightPx;
   const zoneHVirtual = (safeZone.heightPct / 100) * VIRTUAL_STAGE_H;
+  const topHeaderVirtualH = metaSizePx * 1.24 + headerSizePx * 1.24 + 7;
+  const bottomReservedVirtualH = 6 + footerSizePx * 1.26 + 7 + barcodeHeightPx + 3 + serialSizePx * 1.15 + 2;
   const availableRowsVirtual = Math.max(
-    30,
-    zoneHVirtual - padYPx * 2 - 38 - (footerSizePx * 1.5 + barcodeHeightPx + serialSizePx * 1.4 + 14)
+    35,
+    zoneHVirtual - padYPx * 2 - topHeaderVirtualH - bottomReservedVirtualH
   );
   const showTwoLineTrack =
-    availableRowsVirtual / Math.max(1, receiptTracks.length) >= trackSizePx + artistSizePx + 6;
+    availableRowsVirtual / Math.max(1, receiptTracks.length) >= trackSizePx + artistSizePx + 2;
 
   const allStrokesToRender = activeStroke ? [...strokes, activeStroke] : strokes;
 
@@ -727,41 +738,42 @@ export const SlipNoctyModal: React.FC = () => {
                     </div>
 
                     {/* Middle Apple Liquid Glass Card (Tracks + Durations) */}
-                    <div className="relative z-10 h-[520px] rounded-[24px] bg-gradient-to-br from-white/[0.12] to-white/[0.05] backdrop-blur-xl border border-white/[0.18] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.28),0_16px_38px_rgba(0,0,0,0.45)] px-[26px] py-[23px] flex flex-col justify-between overflow-hidden">
+                    <div className="relative z-10 h-[520px] rounded-[24px] bg-gradient-to-br from-white/[0.12] to-white/[0.05] backdrop-blur-xl border border-white/[0.18] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.28),0_16px_38px_rgba(0,0,0,0.45)] px-[24px] py-[21px] flex flex-col justify-between overflow-hidden">
                       <div className="shrink-0">
                         <div
                           style={{ fontFamily: '"Courier Prime", "JetBrains Mono", monospace' }}
-                          className="flex items-center justify-between text-[11px] font-semibold text-white/55 pb-2.5 border-b border-white/[0.14]"
+                          className="flex items-center justify-between text-[12px] font-bold text-white/90 pb-2"
                         >
                           <span>NO &nbsp; TRACK / ARTIST</span>
-                          <span>DURATION</span>
+                          <span>TIME</span>
                         </div>
+                        <div className="w-full border-b-2 border-dashed border-white/45" />
                       </div>
 
-                      <div className="flex-1 min-h-0 flex flex-col justify-around py-2 divide-y divide-white/[0.08] overflow-hidden">
+                      <div className="flex-1 min-h-0 flex flex-col justify-start gap-2.5 pt-2.5 pb-1 divide-y divide-white/[0.10] overflow-hidden">
                         {receiptTracks.length === 0 ? (
-                          <p className="text-center text-sm text-white/65">
+                          <p className="text-center text-sm font-semibold text-white/65 my-auto">
                             BELUM ADA LAGU DIPILIH
                           </p>
                         ) : (
                           receiptTracks.map((t, idx) => (
                             <div
                               key={`${t.id}-${idx}`}
-                              className="flex items-center gap-3 pt-2 first:pt-0 min-w-0"
+                              className="flex items-start gap-2.5 pt-2 first:pt-0 min-w-0"
                             >
                               <span
                                 style={{
                                   fontFamily: '"Courier Prime", "JetBrains Mono", monospace',
                                 }}
-                                className="w-6 text-[14px] font-bold text-white/50 tabular-nums shrink-0"
+                                className="w-6 text-[16px] font-extrabold text-white tabular-nums shrink-0 leading-none"
                               >
                                 {String(idx + 1).padStart(2, '0')}
                               </span>
                               <div className="flex-1 min-w-0">
-                                <p className="font-display text-[16px] font-bold text-white truncate leading-tight">
+                                <p className="font-display text-[16px] font-extrabold text-white uppercase truncate leading-none">
                                   {t.title}
                                 </p>
-                                <p className="text-[12.5px] text-white/65 truncate mt-0.5">
+                                <p className="text-[12px] font-semibold text-white/75 truncate mt-[1px] leading-tight">
                                   {t.artist}
                                 </p>
                               </div>
@@ -769,7 +781,7 @@ export const SlipNoctyModal: React.FC = () => {
                                 style={{
                                   fontFamily: '"Courier Prime", "JetBrains Mono", monospace',
                                 }}
-                                className="text-[13px] font-bold text-white/90 tabular-nums text-right shrink-0"
+                                className="text-[13px] font-bold text-white/95 tabular-nums text-right shrink-0 leading-tight"
                               >
                                 {formatDuration(t.duration || 0)}
                               </span>
@@ -778,22 +790,25 @@ export const SlipNoctyModal: React.FC = () => {
                         )}
                       </div>
 
-                      <div
-                        style={{ fontFamily: '"Courier Prime", "JetBrains Mono", monospace' }}
-                        className="shrink-0 pt-3 border-t border-white/[0.14] flex items-center justify-between text-[12px] font-bold text-white/90 tabular-nums"
-                      >
-                        <span>ITEM COUNT: {receiptTracks.length}</span>
-                        <span>TOTAL: {formatDuration(totalReceiptSeconds)}</span>
+                      <div className="shrink-0">
+                        <div className="w-full border-b-2 border-dashed border-white/45 mb-2.5" />
+                        <div
+                          style={{ fontFamily: '"Courier Prime", "JetBrains Mono", monospace' }}
+                          className="flex items-center justify-between text-[12.5px] font-bold text-white tabular-nums"
+                        >
+                          <span>ITEM COUNT: {receiptTracks.length}</span>
+                          <span>TOTAL: {formatDuration(totalReceiptSeconds)}</span>
+                        </div>
                       </div>
                     </div>
 
                     {/* Bottom Crisp White Code 128 Barcode inside Dark Liquid Glass Dock */}
                     <div className="relative z-10 space-y-2.5">
-                      <div className="rounded-[21px] bg-gradient-to-br from-white/[0.12] to-white/[0.05] backdrop-blur-xl border border-white/[0.18] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.28),0_14px_32px_rgba(0,0,0,0.4)] px-[35px] py-[22px] flex flex-col items-center gap-3">
+                      <div className="rounded-[21px] bg-gradient-to-br from-white/[0.12] to-white/[0.05] backdrop-blur-xl border border-white/[0.18] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.28),0_14px_32px_rgba(0,0,0,0.4)] px-[28px] py-[22px] flex flex-col items-center gap-3">
                         <svg
-                          viewBox={`0 0 ${encodedBarcode.totalModules} ${barcodeHeightPx + 10}`}
+                          viewBox={`0 0 ${encodedBarcode.totalModules} ${barcodeHeightPx}`}
                           preserveAspectRatio="none"
-                          style={{ width: '100%', height: barcodeHeightPx + 10 }}
+                          style={{ width: '85%', height: barcodeHeightPx }}
                           aria-label={`Barcode Code 128 berisi ${encodedBarcode.normalizedText}`}
                           shapeRendering="crispEdges"
                         >
@@ -803,14 +818,14 @@ export const SlipNoctyModal: React.FC = () => {
                               x={bar.x}
                               y={0}
                               width={bar.w}
-                              height={barcodeHeightPx + 10}
+                              height={barcodeHeightPx}
                               fill="#FFFFFF"
                             />
                           ))}
                         </svg>
                         <p
                           style={{ fontFamily: '"Courier Prime", "JetBrains Mono", monospace' }}
-                          className="text-[11px] font-bold tracking-wider text-white/85 text-center"
+                          className="text-[10px] font-bold tracking-wider text-white/90 text-center"
                         >
                           {serialCode}
                         </p>
@@ -844,8 +859,8 @@ export const SlipNoctyModal: React.FC = () => {
                         paddingTop: padYPx,
                         paddingBottom: padYPx,
                         fontFamily: '"Courier Prime", "JetBrains Mono", monospace',
-                        color: '#1A1A1A',
-                        opacity: 0.92,
+                        color: '#111111',
+                        textShadow: '0 0 0.65px rgba(17, 17, 17, 0.32)',
                       }}
                       className="absolute flex flex-col justify-between overflow-hidden pointer-events-none"
                     >
@@ -853,34 +868,38 @@ export const SlipNoctyModal: React.FC = () => {
                       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                         <div className="shrink-0">
                           <div
-                            style={{ fontSize: metaSizePx, lineHeight: 1.35 }}
-                            className="flex items-center justify-between font-bold tracking-tight"
+                            style={{ fontSize: metaSizePx, lineHeight: 1.24 }}
+                            className="flex items-center justify-between font-extrabold tracking-tight"
                           >
                             <span>ORDER #{orderCode}</span>
                             <span>{todayDateLabel}</span>
                           </div>
 
                           <div
-                            style={{ fontSize: headerSizePx, lineHeight: 1.25 }}
-                            className="mt-0.5 flex items-center font-bold"
+                            style={{ fontSize: headerSizePx, lineHeight: 1.24 }}
+                            className="mt-[1px] flex items-center font-extrabold"
                           >
-                            <span className="w-[18px] shrink-0">NO</span>
+                            <span style={{ width: noColWPx }} className="shrink-0">
+                              NO
+                            </span>
                             <span className="flex-1 min-w-0 truncate">TRACK / ARTIST</span>
-                            <span className="w-[38px] text-right shrink-0">TIME</span>
+                            <span style={{ width: timeColWPx }} className="text-right shrink-0">
+                              TIME
+                            </span>
                           </div>
 
-                          <div
-                            className="my-1 border-b border-dashed"
-                            style={{ borderColor: 'rgba(26,26,26,0.55)' }}
-                          />
+                          <div className="my-1 w-full border-b-2 border-dashed border-[#1A1A1A]/70" />
                         </div>
 
-                        {/* Dynamic Track List */}
-                        <div className="flex-1 min-h-0 flex flex-col justify-evenly overflow-hidden py-0.5">
+                        {/* Dense Thermal Receipt Track List */}
+                        <div
+                          style={{ gap: `${trackRowGapPx}px` }}
+                          className="flex-1 min-h-0 flex flex-col justify-start overflow-hidden pt-0.5"
+                        >
                           {receiptTracks.length === 0 ? (
                             <p
                               style={{ fontSize: trackSizePx }}
-                              className="text-center font-normal opacity-75"
+                              className="text-center font-semibold opacity-75 my-auto"
                             >
                               BELUM ADA LAGU DIPILIH
                             </p>
@@ -888,42 +907,63 @@ export const SlipNoctyModal: React.FC = () => {
                             receiptTracks.map((t, idx) => (
                               <div
                                 key={`${t.id}-${idx}`}
-                                className="flex items-center gap-0 leading-tight min-w-0"
+                                className="flex items-start gap-0 min-w-0"
                               >
                                 <span
-                                  style={{ fontSize: trackSizePx }}
-                                  className="w-[18px] font-bold shrink-0 tabular-nums"
+                                  style={{ fontSize: trackSizePx, width: noColWPx, lineHeight: 1.05 }}
+                                  className="font-extrabold shrink-0 tabular-nums"
                                 >
                                   {String(idx + 1).padStart(2, '0')}
                                 </span>
-                                <div className="flex-1 min-w-0 pr-1.5">
+                                <div className="flex-1 min-w-0 pr-1">
                                   {showTwoLineTrack ? (
                                     <>
                                       <p
-                                        style={{ fontSize: trackSizePx, lineHeight: 1.15 }}
-                                        className="font-bold truncate uppercase"
+                                        style={{
+                                          fontSize: trackSizePx,
+                                          lineHeight: 1.05,
+                                          fontWeight: 800,
+                                          color: '#111111',
+                                        }}
+                                        className="truncate uppercase"
                                       >
                                         {t.title}
                                       </p>
                                       <p
-                                        style={{ fontSize: artistSizePx, lineHeight: 1.12 }}
-                                        className="truncate opacity-72"
+                                        style={{
+                                          fontSize: artistSizePx,
+                                          lineHeight: 1.1,
+                                          fontWeight: 600,
+                                          color: '#333333',
+                                          marginTop: '1px',
+                                          textShadow: '0 0 0.45px rgba(17, 17, 17, 0.2)',
+                                        }}
+                                        className="truncate"
                                       >
                                         {t.artist}
                                       </p>
                                     </>
                                   ) : (
                                     <p
-                                      style={{ fontSize: trackSizePx, lineHeight: 1.18 }}
-                                      className="font-bold truncate uppercase"
+                                      style={{
+                                        fontSize: trackSizePx,
+                                        lineHeight: 1.1,
+                                        fontWeight: 800,
+                                        color: '#111111',
+                                      }}
+                                      className="truncate uppercase"
                                     >
                                       {t.title} - {t.artist}
                                     </p>
                                   )}
                                 </div>
                                 <span
-                                  style={{ fontSize: trackSizePx }}
-                                  className="w-[38px] text-right font-bold shrink-0 tabular-nums"
+                                  style={{
+                                    fontSize: durationSizePx,
+                                    width: timeColWPx,
+                                    lineHeight: 1.1,
+                                  }}
+                                  className="text-right font-extrabold shrink-0 tabular-nums"
                                 >
                                   {formatDuration(t.duration || 0)}
                                 </span>
@@ -933,27 +973,24 @@ export const SlipNoctyModal: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Bottom Locked Group: TOTAL + Code 128 Linear Barcode */}
+                      {/* Bottom Locked Group: TOTAL + Full-Width Dashed Line + Tall Code 128 Barcode */}
                       <div className="shrink-0 pt-0.5">
+                        <div className="mb-1 w-full border-b-2 border-dashed border-[#1A1A1A]/70" />
                         <div
-                          className="mb-1 border-b border-dashed"
-                          style={{ borderColor: 'rgba(26,26,26,0.55)' }}
-                        />
-                        <div
-                          style={{ fontSize: footerSizePx, lineHeight: 1.3 }}
-                          className="flex items-center justify-between font-bold tabular-nums mb-1"
+                          style={{ fontSize: footerSizePx, lineHeight: 1.24 }}
+                          className="flex items-center justify-between font-extrabold tabular-nums mb-1"
                         >
                           <span>ITEM COUNT: {receiptTracks.length}</span>
                           <span>TOTAL: {formatDuration(totalReceiptSeconds)}</span>
                         </div>
 
-                        {/* Real 1D Code 128 SVG Barcode */}
+                        {/* Real 1D Code 128 SVG Barcode (85% paper width, 68px–80px at export) */}
                         <div className="flex flex-col items-center">
                           <svg
                             viewBox={`0 0 ${encodedBarcode.totalModules} ${barcodeHeightPx}`}
                             preserveAspectRatio="none"
                             style={{
-                              width: Math.min(zoneInnerWVirtual * 0.92, 260),
+                              width: Math.round(zoneInnerWVirtual * 0.85),
                               height: barcodeHeightPx,
                             }}
                             aria-label={`Barcode Code 128 berisi ${encodedBarcode.normalizedText}`}
@@ -966,13 +1003,13 @@ export const SlipNoctyModal: React.FC = () => {
                                 y={0}
                                 width={bar.w}
                                 height={barcodeHeightPx}
-                                fill="#1A1A1A"
+                                fill="#111111"
                               />
                             ))}
                           </svg>
                           <p
-                            style={{ fontSize: serialSizePx, lineHeight: 1.2 }}
-                            className="mt-0.5 font-bold tracking-wider text-center"
+                            style={{ fontSize: serialSizePx, lineHeight: 1.15 }}
+                            className="mt-0.5 font-extrabold tracking-wider text-center text-[#111111]"
                           >
                             {serialCode}
                           </p>

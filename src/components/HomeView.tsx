@@ -337,6 +337,7 @@ export const HomeView: React.FC = () => {
                     track={track}
                     index={idx}
                     contextTracks={searchResults}
+                    isSearchResult={true}
                   />
                 ))}
               </div>

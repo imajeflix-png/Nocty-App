@@ -46,9 +46,11 @@ import {
 } from '../services/storageDb';
 import {
   fetchCuratedFeeds,
+  generateSmartRadioTracks,
   isPreviewAudioUrl,
+  isValidOfficialMusicVideoCandidate,
   resolveFullStream,
-  resolveYouTubeMusicVideoId,
+  resolveYouTubeMusicVideoCandidates,
   searchOnlineTracks,
   searchYouTubeTracks,
 } from '../services/musicApi';
@@ -59,7 +61,7 @@ import {
   detectTrackMood,
   extractCoverAmbientPalette,
   generateSquircleArtworkDataUrl,
-  mixTracksByMood,
+  normalizeTypoSearchText,
   smartShuffleTracks,
 } from '../utils/audioUtils';
 import { generateSimulatedWeeklyHistory } from '../utils/weeklyAuraUtils';
@@ -233,7 +235,7 @@ interface PlayerContextValue {
   playTrack: (
     track: Track,
     contextTracks?: Track[],
-    options?: { preserveOrder?: boolean }
+    options?: { preserveOrder?: boolean; fromSearch?: boolean }
   ) => void;
   playTrackAtTime: (track: Track, startSeconds?: number) => void;
   togglePlayPause: () => void;
@@ -263,6 +265,8 @@ interface PlayerContextValue {
   // Ambient Video Backdrop & Focus Zone Official MV
   activeEngine: PlaybackEngine;
   ambientVideoId: string | null;
+  ambientVideoCandidates: Track[];
+  selectAmbientVideoId: (videoId: string) => void;
   isResolvingAmbientVideo: boolean;
   isFocusMvActive: boolean;
   setIsFocusMvActive: (active: boolean) => void;
@@ -319,7 +323,7 @@ const PlayerContext = createContext<PlayerContextValue | null>(null);
 
 let ytScriptPromise: Promise<void> | null = null;
 
-function loadYouTubeIframeApi(): Promise<void> {
+export function loadYouTubeIframeApi(): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
   if (window.YT?.Player) return Promise.resolve();
   if (ytScriptPromise) return ytScriptPromise;
@@ -449,6 +453,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isWeeklyAuraOpen, setIsWeeklyAuraOpen] = useState(false);
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
   const [ambientVideoId, setAmbientVideoId] = useState<string | null>(null);
+  const [ambientVideoCandidates, setAmbientVideoCandidates] = useState<Track[]>([]);
   const [isResolvingAmbientVideo, setIsResolvingAmbientVideo] = useState<boolean>(false);
   const [isFocusMvActive, setIsFocusMvActive] = useState<boolean>(false);
   const [listeningHistory, setListeningHistory] = useState<ListeningHistoryEntry[]>(() =>
@@ -500,6 +505,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const lyricsAbortRef = useRef<AbortController | null>(null);
   const moodMixSeqRef = useRef(0);
   const moodShuffleAbortRef = useRef<AbortController | null>(null);
+  const smartRadioSeqRef = useRef(0);
+  const smartRadioAbortRef = useRef<AbortController | null>(null);
   const moodAnalysisCacheRef = useRef<
     Map<string, { profile: MoodSessionProfile; matchedTrackIds: string[] }>
   >(new Map());
@@ -1232,7 +1239,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
   }, [networkMode]);
 
-  // Resolve real moving YouTube Official Music Video ID (strictly excluding Lyrics/Static/Cover)
+  const selectAmbientVideoId = useCallback((videoId: string) => {
+    setAmbientVideoId(videoId);
+  }, []);
+
+  // Resolve real moving YouTube Official Music Video candidates (strictly excluding - Topic, Provided to YouTube, Audio/Static/Lyrics/Cover/Karaoke)
   useEffect(() => {
     const shouldResolveMv = isAmbientVideoEnabled || (isZenMode && isFocusMvActive);
     if (
@@ -1243,40 +1254,64 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       isAppInBackground
     ) {
       setAmbientVideoId(null);
+      setAmbientVideoCandidates([]);
       setIsResolvingAmbientVideo(false);
       return;
     }
 
+    const expectedDur = duration > 45 ? duration : currentTrack.duration;
     const raw = (currentTrack.rawTitle || '').toLowerCase();
     const isAlreadyVerifiedMv =
       Boolean(currentTrack.videoId) &&
       (raw.includes('official music video') ||
         raw.includes('official mv') ||
+        raw.includes('music video') ||
         raw.includes('official video')) &&
-      !/\b(karaoke|smule|starmaker|slowed|reverb|nightcore|8d\s*audio|sped\s*up|reaction|tutorial)\b/i.test(
-        raw
-      );
+      isValidOfficialMusicVideoCandidate(currentTrack, currentTrack.artist, expectedDur);
 
     if (isAlreadyVerifiedMv && currentTrack.videoId) {
       setAmbientVideoId(currentTrack.videoId);
+      setAmbientVideoCandidates([currentTrack]);
       setIsResolvingAmbientVideo(false);
-      return;
+    } else {
+      setAmbientVideoId(null);
+      setAmbientVideoCandidates([]);
+      setIsResolvingAmbientVideo(true);
     }
 
-    setAmbientVideoId(null);
-    setIsResolvingAmbientVideo(true);
     const controller = new AbortController();
 
-    resolveYouTubeMusicVideoId(currentTrack.artist, currentTrack.title, controller.signal)
-      .then((mvId) => {
-        if (!controller.signal.aborted) {
-          setAmbientVideoId(mvId || null);
-          setIsResolvingAmbientVideo(false);
-        }
+    resolveYouTubeMusicVideoCandidates(
+      currentTrack.artist,
+      currentTrack.title,
+      expectedDur,
+      controller.signal
+    )
+      .then((candidates) => {
+        if (controller.signal.aborted) return;
+        const merged =
+          isAlreadyVerifiedMv && currentTrack.videoId
+            ? [
+                currentTrack,
+                ...candidates.filter((c) => c.videoId && c.videoId !== currentTrack.videoId),
+              ].slice(0, 10)
+            : candidates;
+
+        setAmbientVideoCandidates(merged);
+        setAmbientVideoId((prev) => {
+          if (isAlreadyVerifiedMv && currentTrack.videoId) {
+            return prev || currentTrack.videoId;
+          }
+          return merged[0]?.videoId || null;
+        });
+        setIsResolvingAmbientVideo(false);
       })
       .catch(() => {
         if (!controller.signal.aborted) {
-          setAmbientVideoId(null);
+          if (!isAlreadyVerifiedMv) {
+            setAmbientVideoId(null);
+            setAmbientVideoCandidates([]);
+          }
           setIsResolvingAmbientVideo(false);
         }
       });
@@ -1286,6 +1321,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     currentTrack?.id,
     currentTrack?.videoId,
     currentTrack?.rawTitle,
+    currentTrack?.channelName,
+    currentTrack?.description,
+    currentTrack?.duration,
     currentTrack?.sourceType,
     isAmbientVideoEnabled,
     isZenMode,
@@ -1919,28 +1957,18 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (currentTrackObj) {
           const anchorMood = detectTrackMood(currentTrackObj);
           setIsBuffering(true);
-          searchOnlineTracks(
-            `${anchorMood.autoplayHint} ${currentTrackObj.artist}`,
-            undefined,
-            20
-          )
-            .then(({ tracks }) => {
-              const fresh = tracks.filter((t) => !queueIdsRef.current.includes(t.id));
+          const localPool = Object.values(trackRegistryRef.current);
+          generateSmartRadioTracks(currentTrackObj, localPool)
+            .then((radioTracks) => {
+              const fresh = radioTracks.filter((t) => !queueIdsRef.current.includes(t.id));
               if (fresh.length > 0) {
                 registerTracks(fresh);
-                const moodOrdered = mixTracksByMood(currentTrackObj, fresh).filter(
-                  (t) => t.id !== currentTrackObj.id
-                );
                 const orderedFresh = isShuffledRef.current
-                  ? smartShuffleTracks(
-                      moodOrdered,
-                      listeningHistoryRef.current,
-                      currentTrackObj
-                    )
-                  : moodOrdered;
+                  ? smartShuffleTracks(fresh, listeningHistoryRef.current, currentTrackObj)
+                  : fresh;
                 const newIds = orderedFresh.map((t) => t.id);
                 const prevLen = queueIdsRef.current.length;
-                const nextOrig = [...originalQueueIdsRef.current, ...moodOrdered.map((t) => t.id)];
+                const nextOrig = [...originalQueueIdsRef.current, ...fresh.map((t) => t.id)];
                 const nextQ = [...queueIdsRef.current, ...newIds];
                 originalQueueIdsRef.current = nextOrig;
                 queueIdsRef.current = nextQ;
@@ -1954,7 +1982,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                   currentTrackIdRef.current = nextTrack.id;
                   startPlaybackRef.current(nextTrack, false, 'auto');
                   pushToast(
-                    `Autoplay (${anchorMood.label}): ${nextTrack.title}`,
+                    `Smart Radio (${anchorMood.label}): ${nextTrack.title}`,
                     'info'
                   );
                   return;
@@ -2438,11 +2466,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     (
       track: Track,
       contextTracks?: Track[],
-      _options?: { preserveOrder?: boolean }
+      options?: { preserveOrder?: boolean; fromSearch?: boolean }
     ) => {
       releaseTransitionLock();
 
-      if (track.id === currentTrackIdRef.current && !contextTracks) {
+      if (track.id === currentTrackIdRef.current && !contextTracks && !options?.fromSearch) {
         const deckIdx = activeYtDeckRef.current;
         const ytPlayer = ytPlayersRef.current[deckIdx];
         if (activeEngineRef.current === 'youtube' && ytReadyRef.current[deckIdx] && ytPlayer) {
@@ -2468,7 +2496,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       // Clicking a track already inside the visible Queue updates currentIndex in-place without scrambling
-      if (!contextTracks && queueIdsRef.current.includes(track.id)) {
+      if (!contextTracks && !options?.fromSearch && queueIdsRef.current.includes(track.id)) {
         registerTracks([track]);
         const idxInQueue = queueIdsRef.current.indexOf(track.id);
         currentIndexRef.current = idxInQueue;
@@ -2479,9 +2507,62 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       ++moodMixSeqRef.current;
+      smartRadioAbortRef.current?.abort();
+      const radioSeq = ++smartRadioSeqRef.current;
+
+      if (options?.fromSearch) {
+        // IMPORTANT: When playing from Search Results, NEVER queue the other search results
+        // (which often share the same title across unrelated genres). Queue ONLY the chosen track
+        // and immediately generate a Spotify-style Smart Radio Queue in the background.
+        registerTracks([track]);
+        isShuffledRef.current = false;
+        setIsShuffled(false);
+        originalQueueIdsRef.current = [track.id];
+        queueIdsRef.current = [track.id];
+        setOriginalQueueIds([track.id]);
+        setQueueIds([track.id]);
+        currentIndexRef.current = 0;
+        setCurrentIndex(0);
+        currentTrackIdRef.current = track.id;
+        startPlaybackForTrack(track, false, 'skip');
+
+        const radioController = new AbortController();
+        smartRadioAbortRef.current = radioController;
+        const localPool = [
+          ...indonesiaTrending,
+          ...featuredTracks,
+          ...viralTracks,
+          ...indieRnbTracks,
+          ...likedIds.map((id) => trackRegistryRef.current[id]).filter((t): t is Track => Boolean(t)),
+        ];
+
+        generateSmartRadioTracks(track, localPool, radioController.signal)
+          .then((radioTracks) => {
+            if (
+              radioController.signal.aborted ||
+              smartRadioSeqRef.current !== radioSeq ||
+              currentTrackIdRef.current !== track.id ||
+              radioTracks.length === 0
+            ) {
+              return;
+            }
+            registerTracks(radioTracks);
+            const nextIds = [track.id, ...radioTracks.map((t) => t.id)];
+            originalQueueIdsRef.current = nextIds;
+            queueIdsRef.current = nextIds;
+            setOriginalQueueIds(nextIds);
+            setQueueIds(nextIds);
+            currentIndexRef.current = 0;
+            setCurrentIndex(0);
+          })
+          .catch(() => {
+            // Silently ignore background radio generation failures; autoplay handles end-of-track
+          });
+        return;
+      }
 
       if (contextTracks && contextTracks.length > 0) {
-        // Explicit sequential queue (index 0, 1, 2, ...) matching Search Results / Playlist / Shelf order
+        // Explicit sequential queue (index 0, 1, 2, ...) matching Playlist / Shelf order
         registerTracks(contextTracks);
         const baseIds = Array.from(new Set(contextTracks.map((t) => t.id)));
         if (!baseIds.includes(track.id)) baseIds.unshift(track.id);
@@ -2524,6 +2605,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       featuredTracks,
       indieRnbTracks,
       indonesiaTrending,
+      likedIds,
       registerTracks,
       releaseTransitionLock,
       startPlaybackForTrack,
@@ -2534,6 +2616,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const playTrackAtTime = useCallback(
     (track: Track, startSeconds = 0) => {
       releaseTransitionLock();
+      smartRadioAbortRef.current?.abort();
+      ++smartRadioSeqRef.current;
       const pool = [
         track,
         ...indonesiaTrending,
@@ -3467,14 +3551,21 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const localSearchMatches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const qSqueezed = normalizeTypoSearchText(searchQuery);
     const pool = localTracks.map((t) => trackRegistry[t.id] || t);
     if (!q) return pool.map((track) => ({ track, snippet: undefined as string | undefined }));
 
     const matched: Array<{ track: Track; snippet?: string }> = [];
     for (const track of pool) {
-      const titleHit = track.title.toLowerCase().includes(q);
-      const artistHit = track.artist.toLowerCase().includes(q);
-      const albumHit = (track.album || '').toLowerCase().includes(q);
+      const titleHit =
+        track.title.toLowerCase().includes(q) ||
+        (qSqueezed.length >= 2 && normalizeTypoSearchText(track.title).includes(qSqueezed));
+      const artistHit =
+        track.artist.toLowerCase().includes(q) ||
+        (qSqueezed.length >= 2 && normalizeTypoSearchText(track.artist).includes(qSqueezed));
+      const albumHit =
+        (track.album || '').toLowerCase().includes(q) ||
+        (qSqueezed.length >= 2 && normalizeTypoSearchText(track.album || '').includes(qSqueezed));
       const lyricHit = track.lyrics.find((l) => l.text.toLowerCase().includes(q));
       const plainHit =
         !lyricHit && track.plainLyrics
@@ -3522,9 +3613,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     append(onlineSearchResults);
     append(lyricLibraryMatches.map((m) => m.track));
 
-    // Provide instant local/chart feedback while debounced global search is still fetching
+    // Provide instant local/chart feedback while debounced global search is still fetching (typo-tolerant)
     if (onlineSearchResults.length === 0) {
-      const tokens = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
+      const tokens = normalizeTypoSearchText(trimmed).split(/\s+/).filter(Boolean);
       const instantPool = [
         ...likedTracks,
         ...indonesiaTrending,
@@ -3534,8 +3625,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ...queueTracks,
       ];
       for (const t of instantPool) {
-        const hay = `${t.title} ${t.artist} ${t.album || ''}`.toLowerCase();
-        if (tokens.every((tok) => hay.includes(tok)) && !map.has(t.id)) {
+        const hay = normalizeTypoSearchText(`${t.title} ${t.artist} ${t.album || ''}`);
+        if (tokens.length > 0 && tokens.every((tok) => hay.includes(tok)) && !map.has(t.id)) {
           map.set(t.id, t);
         }
       }
@@ -3638,6 +3729,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     cancelSleepTimer,
     activeEngine,
     ambientVideoId,
+    ambientVideoCandidates,
+    selectAmbientVideoId,
     isResolvingAmbientVideo,
     isFocusMvActive,
     setIsFocusMvActive,

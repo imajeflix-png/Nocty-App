@@ -11,6 +11,8 @@ export interface Track {
   title: string;
   rawTitle?: string;
   channelName?: string;
+  description?: string;
+  isVerifiedChannel?: boolean;
   artist: string;
   album?: string;
   duration: number; // in seconds

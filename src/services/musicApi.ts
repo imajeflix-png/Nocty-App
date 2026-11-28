@@ -1,6 +1,15 @@
 import { Track } from '../types/music';
 import { DEFAULT_COVER_URL } from '../data/moods';
 import {
+  detectTrackMood,
+  extractPrimaryArtistName,
+  getPrimaryArtistKey,
+  getSimilarArtistsForTrack,
+  getTypoQueryVariant,
+  normalizeTitleKey,
+  normalizeTypoSearchText,
+} from '../utils/audioUtils';
+import {
   getCurrentNetworkMode,
   reportApiTiming,
   resizeCoverUrlForMode,
@@ -37,6 +46,8 @@ interface ApiTrackPayload {
   title: string;
   rawTitle?: string;
   channelName?: string;
+  description?: string;
+  isVerifiedChannel?: boolean;
   artist: string;
   album?: string;
   duration: number;
@@ -84,7 +95,7 @@ export interface ResolvedFullStream {
 }
 
 const resolvedVideoIdCache = new Map<string, { videoId: string; duration?: number }>();
-const resolvedMusicVideoIdCache = new Map<string, string>();
+const resolvedMusicVideoCandidatesCache = new Map<string, Track[]>();
 
 function readStreamCache(): Record<string, CachedStreamEntry> {
   try {
@@ -287,35 +298,121 @@ function bigramSimilarity(a: string, b: string): number {
   return (2 * intersection) / (totalA + totalB || 1);
 }
 
-function scoreClientTrackRelevance(track: Track, query: string, orderIdx: number): number {
+const CLIENT_POPULAR_ARTIST_SET = new Set([
+  'hindia',
+  '.feast',
+  'feast',
+  'tulus',
+  'bernadya',
+  'nadin amizah',
+  'sal priadi',
+  'pamungkas',
+  'feby putri',
+  'mahalini',
+  'lyodra',
+  'tiara andini',
+  'rizky febian',
+  'juicy luicy',
+  'sheila on 7',
+  'dewa 19',
+  'dewa',
+  'noah',
+  'peterpan',
+  'padi',
+  'ungu',
+  'nidji',
+  'niki',
+  'rich brian',
+  'ardhito pramono',
+  'nadhif basalamah',
+  'raisa',
+  'afgan',
+  'yura yunita',
+  'kunto aji',
+  'reality club',
+  'fourtwnty',
+  'payung teduh',
+  'danilla',
+  'efek rumah kaca',
+  'barasuara',
+  'perunggu',
+  'denny caknan',
+  'the weeknd',
+  'bruno mars',
+  'taylor swift',
+  'billie eilish',
+  'ariana grande',
+  'dua lipa',
+  'coldplay',
+  'sza',
+  'joji',
+  'daniel caesar',
+  'frank ocean',
+  'keshi',
+  'laufey',
+  'lany',
+  'sabrina carpenter',
+  'harry styles',
+  'arctic monkeys',
+  'radiohead',
+  'olivia rodrigo',
+  'bts',
+  'blackpink',
+  'newjeans',
+  'bigbang',
+  'seventeen',
+  'twice',
+  'aespa',
+  'ive',
+  'jungkook',
+  'iu',
+]);
+
+function scoreClientTrackRelevance(
+  track: Track,
+  query: string,
+  orderIdx: number,
+  sourceHits = 1
+): number {
   const q = normalizeSearchText(query);
   if (!q) return -orderIdx * 0.1;
 
   const t = normalizeSearchText(track.title);
   const a = normalizeSearchText(track.artist);
+  const qSqueezed = normalizeTypoSearchText(query);
+  const tSqueezed = normalizeTypoSearchText(track.title);
+  const aSqueezed = normalizeTypoSearchText(track.artist);
+
   const qCompact = compactSearchText(query);
   const tCompact = compactSearchText(track.title);
   const aCompact = compactSearchText(track.artist);
+  const qSqueezedCompact = qSqueezed.replace(/\s+/g, '');
+  const tSqueezedCompact = tSqueezed.replace(/\s+/g, '');
+  const aSqueezedCompact = aSqueezed.replace(/\s+/g, '');
   const combinedCompact = `${tCompact}${aCompact}`;
 
-  let score = -orderIdx * 0.12;
+  let score = Math.max(0, 12 - orderIdx * 0.75);
 
-  if (a === q) score += 26;
-  else if (a.startsWith(q) || a.includes(q)) score += 15;
+  if (sourceHits > 1) {
+    score += Math.min(30, (sourceHits - 1) * 11);
+  }
 
-  if (t === q) score += 28;
-  else if (t.startsWith(q)) score += 18;
-  else if (t.includes(q)) score += 12;
+  if (a === q || (qSqueezed && aSqueezed === qSqueezed)) score += 28;
+  else if (a.startsWith(q) || a.includes(q) || (qSqueezed && aSqueezed.includes(qSqueezed))) score += 16;
 
-  if (qCompact.length >= 4) {
-    if (tCompact === qCompact) score += 32;
-    else if (tCompact.includes(qCompact)) score += 24;
-    else if (aCompact === qCompact) score += 24;
-    else if (combinedCompact.includes(qCompact)) score += 18;
+  if (t === q || (qSqueezed && tSqueezed === qSqueezed)) score += 34;
+  else if (t.startsWith(q) || (qSqueezed && tSqueezed.startsWith(qSqueezed))) score += 22;
+  else if (t.includes(q) || (qSqueezed && tSqueezed.includes(qSqueezed))) score += 14;
+
+  if (qSqueezedCompact.length >= 4) {
+    if (tCompact === qCompact || tSqueezedCompact === qSqueezedCompact) score += 30;
+    else if (tCompact.includes(qCompact) || tSqueezedCompact.includes(qSqueezedCompact)) score += 22;
+    else if (aCompact === qCompact || aSqueezedCompact === qSqueezedCompact) score += 22;
+    else if (combinedCompact.includes(qCompact)) score += 16;
     else {
       const bestSim = Math.max(
-        bigramSimilarity(qCompact, tCompact),
-        bigramSimilarity(qCompact, combinedCompact)
+        bigramSimilarity(qSqueezedCompact, tSqueezedCompact),
+        bigramSimilarity(qSqueezedCompact, `${tSqueezedCompact}${aSqueezedCompact}`)
       );
       if (bestSim >= 0.55) {
         score += bestSim * 22;
@@ -323,30 +420,49 @@ function scoreClientTrackRelevance(track: Track, query: string, orderIdx: number
     }
   }
 
-  const qTokens = q.split(' ').filter((tok) => tok.length >= 2);
-  const targetTokens = `${t} ${a}`.split(' ').filter((tok) => tok.length >= 2);
+  const qTokens = qSqueezed.split(' ').filter((tok) => tok.length >= 2);
+  const targetTokens = `${tSqueezed} ${aSqueezed}`.split(' ').filter((tok) => tok.length >= 2);
   for (const qt of qTokens) {
-    if (a.includes(qt) || t.includes(qt)) {
-      score += 4.5;
+    if (aSqueezed.includes(qt) || tSqueezed.includes(qt)) {
+      score += 5;
       continue;
     }
     const maxDist = qt.length >= 7 ? 2 : qt.length >= 4 ? 1 : 0;
     if (maxDist > 0 && targetTokens.some((tt) => levenshteinDistance(qt, tt) <= maxDist)) {
-      score += 3.2;
+      score += 3.5;
     }
+  }
+
+  const primaryArtistKey = getPrimaryArtistKey(track.artist);
+  if (CLIENT_POPULAR_ARTIST_SET.has(primaryArtistKey)) {
+    score += 14;
+  }
+  if (track.isVerifiedChannel || /vevo|official/i.test(track.channelName || '')) {
+    score += 7;
   }
 
   if (track.videoId) score += 2.5;
   if (track.duration >= 90) score += 1;
 
-  const combinedRaw = `${track.title} ${track.artist}`.toLowerCase();
+  const combinedRaw = `${track.title} ${track.artist} ${track.rawTitle || ''}`.toLowerCase();
   if (
-    !/(karaoke|masala|biography|tribute|ringtone|parody|rimek|mashup|sped\s*up|slowed|reverb|cover)/.test(q) &&
-    /\b(karaoke|masala|biography|song\s+for|not\s+a\s+.*song|tribute|ringtone|dj\s+viral\s+rimek)\b/i.test(
-      combinedRaw
+    !/(karaoke|masala|biography|tribute|ringtone|parody|rimek|mashup|sped\s*up|slowed|reverb|cover|koplo|dangdut|remix|live|lirik)/.test(
+      qSqueezed
     )
   ) {
-    score -= 30;
+    if (
+      /\b(karaoke|masala|biography|song\s+for|not\s+a\s+.*song|tribute|ringtone|dj\s+viral\s+rimek)\b/i.test(
+        combinedRaw
+      )
+    ) {
+      score -= 35;
+    } else if (
+      /\b(cover|sped\s*up|slowed|reverb|koplo|remix|mashup|live\s+performance|karaoke\s+version)\b/i.test(
+        combinedRaw
+      )
+    ) {
+      score -= 18;
+    }
   }
 
   return score;
@@ -403,6 +519,8 @@ function mapApiTrack(item: ApiTrackPayload, idx: number): Track {
     title: item.title,
     rawTitle: item.rawTitle,
     channelName: item.channelName,
+    description: item.description,
+    isVerifiedChannel: item.isVerifiedChannel,
     artist: item.artist || 'Artis',
     album: item.album || 'Streaming',
     duration: Number.isFinite(item.duration) && item.duration > 0 ? item.duration : 210,
@@ -461,8 +579,10 @@ function parseClientYtTitle(rawTitle: string, uploaderName?: string): { title: s
 async function searchPipedClient(
   query: string,
   externalSignal?: AbortSignal,
-  limit = 16
+  limit = 16,
+  mode: 'audio' | 'mv' = 'audio'
 ): Promise<Track[]> {
+  const pipedFilter = mode === 'mv' ? 'videos' : 'music_songs';
   for (const mirror of PIPED_MIRRORS) {
     try {
       const json = await fetchJsonWithTimeout<{
@@ -470,11 +590,13 @@ async function searchPipedClient(
           url?: string;
           title?: string;
           uploaderName?: string;
+          uploaderVerified?: boolean;
+          shortDescription?: string;
           thumbnail?: string;
           duration?: number;
         }>;
       }>(
-        `${mirror}/search?q=${encodeURIComponent(query)}&filter=music_songs`,
+        `${mirror}/search?q=${encodeURIComponent(query)}&filter=${pipedFilter}`,
         4500,
         externalSignal
       );
@@ -494,6 +616,8 @@ async function searchPipedClient(
           title,
           rawTitle: item.title,
           channelName: item.uploaderName,
+          description: item.shortDescription,
+          isVerifiedChannel: item.uploaderVerified,
           artist,
           album: 'YouTube Music',
           duration: dur,
@@ -521,6 +645,8 @@ async function searchPipedClient(
           videoId?: string;
           title?: string;
           author?: string;
+          authorVerified?: boolean;
+          description?: string;
           lengthSeconds?: number;
         }>
       >(
@@ -540,6 +666,8 @@ async function searchPipedClient(
           title,
           rawTitle: item.title,
           channelName: item.author,
+          description: item.description,
+          isVerifiedChannel: item.authorVerified,
           artist,
           album: 'YouTube Music',
           duration: item.lengthSeconds && item.lengthSeconds > 40 ? Math.round(item.lengthSeconds) : 210,
@@ -654,6 +782,7 @@ async function clientDirectParallelSearch(
 
   const merged: Track[] = [];
   const byKey = new Map<string, number>();
+  const hitCounts = new Map<string, number>();
   const maxLen = Math.max(itunesTracks.length, pipedTracks.length, saavnTracks.length);
 
   for (let i = 0; i < maxLen && merged.length < 50; i++) {
@@ -661,12 +790,16 @@ async function clientDirectParallelSearch(
       const t = list[i];
       if (!t) continue;
       const key = normalizeClientKey(t.title, t.artist);
+      hitCounts.set(key, (hitCounts.get(key) || 0) + 1);
       const existingIdx = byKey.get(key);
       if (existingIdx !== undefined) {
         const existing = merged[existingIdx];
         if (!existing.videoId && t.videoId) existing.videoId = t.videoId;
         if (!existing.rawTitle && t.rawTitle) existing.rawTitle = t.rawTitle;
         if (!existing.channelName && t.channelName) existing.channelName = t.channelName;
+        if (!existing.isVerifiedChannel && t.isVerifiedChannel) {
+          existing.isVerifiedChannel = t.isVerifiedChannel;
+        }
         if (!existing.audioUrl && t.audioUrl) existing.audioUrl = t.audioUrl;
         if (existing.coverUrl === DEFAULT_COVER_URL && t.coverUrl !== DEFAULT_COVER_URL) {
           existing.coverUrl = t.coverUrl;
@@ -679,7 +812,13 @@ async function clientDirectParallelSearch(
   }
 
   return merged
-    .map((track, idx) => ({ track, score: scoreClientTrackRelevance(track, query, idx) }))
+    .map((track, idx) => {
+      const key = normalizeClientKey(track.title, track.artist);
+      return {
+        track,
+        score: scoreClientTrackRelevance(track, query, idx, hitCounts.get(key) || 1),
+      };
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, 40)
     .map((entry) => entry.track);
@@ -689,15 +828,17 @@ export async function searchYouTubeTracks(
   query: string,
   externalSignal?: AbortSignal,
   limit = 16,
-  mode: 'audio' | 'mv' = 'audio'
+  mode: 'audio' | 'mv' = 'audio',
+  expectedDuration = 0
 ): Promise<Track[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
 
   try {
+    const durParam = mode === 'mv' && expectedDuration > 45 ? `&duration=${Math.round(expectedDuration)}` : '';
     const endpoint = `/api/yt-search?q=${encodeURIComponent(trimmed)}&limit=${limit}${
       mode === 'mv' ? '&mode=mv' : ''
-    }`;
+    }${durParam}`;
     const data = await fetchJsonWithTimeout<{ tracks?: ApiTrackPayload[] }>(
       endpoint,
       7500,
@@ -713,7 +854,7 @@ export async function searchYouTubeTracks(
     }
   }
 
-  return searchPipedClient(trimmed, externalSignal, limit).catch(() => []);
+  return searchPipedClient(trimmed, externalSignal, limit, mode).catch(() => []);
 }
 
 /**
@@ -844,13 +985,18 @@ export async function resolveYouTubeVideoId(
 }
 
 const OFFICIAL_CHANNEL_REGEX =
-  /(vevo|official|records|music|entertainment|musica|aquarius|nagaswara|trinity|sony|warner|universal|88rising|label|studio|proaktif|blackboard|ascada|pelangi|falcon|\s-\s*topic$)/i;
+  /(vevo|official|records|music|entertainment|musica|aquarius|nagaswara|trinity|sony|warner|universal|88rising|label|studio|proaktif|blackboard|ascada|pelangi|falcon)/i;
 
-const AMATEUR_MV_KEYWORDS_REGEX =
-  /\b(karaoke|smule|starmaker|guitar\s*cover|piano\s*cover|drum\s*cover|bass\s*cover|violin\s*cover|vocal\s*cover|acoustic\s*cover|slowed|reverb|nightcore|8d\s*audio|sped\s*up|fan\s*made|fanmade|parody|reaction|tutorial|chord|ringtone)\b/i;
+const STRICT_MV_BLOCKED_TITLE_REGEX =
+  /\b(audio|static|lyrics?|lirik|karaoke|cover|slowed|sped\s*up|reverb|nightcore|instrumental|8d\s*audio)\b/i;
 
-function isOfficialChannelUpload(channelName?: string, artistHint?: string): boolean {
-  if (!channelName) return false;
+function isOfficialChannelUpload(
+  channelName?: string,
+  artistHint?: string,
+  isVerifiedChannel?: boolean
+): boolean {
+  if (isVerifiedChannel) return true;
+  if (!channelName || /-\s*topic\b/i.test(channelName)) return false;
   if (OFFICIAL_CHANNEL_REGEX.test(channelName)) return true;
   if (artistHint) {
     const normChannel = normalizeSearchText(channelName);
@@ -860,15 +1006,27 @@ function isOfficialChannelUpload(channelName?: string, artistHint?: string): boo
   return false;
 }
 
-function isValidOfficialMusicVideoCandidate(candidate: Track, artistHint?: string): boolean {
+export function isValidOfficialMusicVideoCandidate(
+  candidate: Track,
+  _artistHint?: string,
+  expectedDuration = 0
+): boolean {
   if (!candidate.videoId) return false;
   const rawTitle = candidate.rawTitle || candidate.title || '';
   const channel = candidate.channelName || '';
-  if (AMATEUR_MV_KEYWORDS_REGEX.test(rawTitle)) return false;
+  const description = candidate.description || '';
 
-  const isOfficialChannel = isOfficialChannelUpload(channel, artistHint);
-  if (/\bcover\b/i.test(rawTitle) && !/\bofficial\b/i.test(rawTitle) && !isOfficialChannel) {
-    return false;
+  // Strict absolute block rules
+  if (/-\s*topic\b/i.test(channel)) return false;
+  if (/provided\s+to\s+youtube/i.test(description)) return false;
+  if (STRICT_MV_BLOCKED_TITLE_REGEX.test(rawTitle)) return false;
+
+  // Duration filter: within ±45s of original track duration (and 45s..720s overall)
+  if (candidate.duration > 0) {
+    if (candidate.duration < 45 || candidate.duration > 720) return false;
+    if (expectedDuration > 45 && Math.abs(candidate.duration - expectedDuration) > 45) {
+      return false;
+    }
   }
 
   return true;
@@ -876,77 +1034,113 @@ function isValidOfficialMusicVideoCandidate(candidate: Track, artistHint?: strin
 
 function scoreMusicVideoCandidate(candidate: Track, artistHint?: string): number {
   const t = (candidate.rawTitle || candidate.title || '').toLowerCase();
-  const c = (candidate.channelName || '').toLowerCase();
-  const isOfficialChannel = isOfficialChannelUpload(candidate.channelName, artistHint);
+  const isOfficialChannel = isOfficialChannelUpload(
+    candidate.channelName,
+    artistHint,
+    candidate.isVerifiedChannel
+  );
 
   let score = 0;
-  if (t.includes('official music video')) score += 20;
-  if (t.includes('official mv')) score += 18;
-  if (t.includes('official video')) score += 16;
-  if (t.includes('music video') || /\bmv\b/.test(t)) score += 12;
-  if (t.includes('official audio')) score += 7;
-  if (t.includes('visualizer')) score += 3;
-  if (t.includes('lyric video') || /\b(lyrics?|lirik)\b/.test(t)) {
-    score += isOfficialChannel ? 1 : -6;
+
+  // Priority 1 (+100 pts): Official Music Video, Official MV, or Music Video
+  if (t.includes('official music video') || t.includes('official mv') || t.includes('music video')) {
+    score += 100;
   }
-  if (t.includes('audio only') || t.includes('static')) score -= 6;
-  if (isOfficialChannel) score += 8;
-  if (c.endsWith('- topic')) score -= 5;
+
+  // Priority 2 (+60 pts): Official Video or verified/label/VEVO channel
+  if (t.includes('official video') || isOfficialChannel) {
+    score += 60;
+  }
+
+  if (/\bmv\b/.test(t)) score += 15;
+  if (t.includes('live') || t.includes('concert') || t.includes('acoustic')) score -= 25;
+  if (t.includes('visualizer')) score -= 10;
+
   return score;
 }
 
-function pickBestOfficialMusicVideo(candidates: Track[], artistHint?: string): Track | null {
-  const filtered = candidates.filter((c) => isValidOfficialMusicVideoCandidate(c, artistHint));
-  if (filtered.length === 0) return null;
+function rankOfficialMusicVideoCandidates(
+  candidates: Track[],
+  artistHint?: string,
+  expectedDuration = 0
+): Track[] {
+  const seen = new Set<string>();
+  const filtered: Track[] = [];
+  for (const c of candidates) {
+    if (!c.videoId || seen.has(c.videoId)) continue;
+    if (!isValidOfficialMusicVideoCandidate(c, artistHint, expectedDuration)) continue;
+    seen.add(c.videoId);
+    filtered.push(c);
+  }
 
-  return (
-    [...filtered].sort(
-      (a, b) => scoreMusicVideoCandidate(b, artistHint) - scoreMusicVideoCandidate(a, artistHint)
-    )[0] || null
+  return filtered.sort(
+    (a, b) => scoreMusicVideoCandidate(b, artistHint) - scoreMusicVideoCandidate(a, artistHint)
   );
 }
 
 /**
- * Resolves a real Official Music Video / Official Video / Official Audio or official artist/label upload videoId
- * for Focus Zone & Ambient Video Backdrop, filtering out amateur karaoke and unofficial covers.
+ * Resolves up to 10 strictly filtered, scored Official Music Video candidates
+ * using query "[Artist] - [Title] Official Music Video".
  */
+export async function resolveYouTubeMusicVideoCandidates(
+  artist: string,
+  title: string,
+  expectedDuration = 0,
+  externalSignal?: AbortSignal
+): Promise<Track[]> {
+  const cleanTitle = title.replace(/\s*\([^)]*\)/g, '').trim();
+  const cleanArtist = artist.split(/,|&|\bfeat\.?\b|\bft\.?\b/i)[0].trim();
+  const durBucket = expectedDuration > 45 ? Math.round(expectedDuration / 10) : 0;
+  const cacheKey = `mv::${cleanArtist.toLowerCase()}::${cleanTitle.toLowerCase()}::${durBucket}`;
+
+  const cached = resolvedMusicVideoCandidatesCache.get(cacheKey);
+  if (cached && cached.length > 0) return cached;
+
+  try {
+    const primaryQuery = `${cleanArtist} - ${cleanTitle} Official Music Video`;
+    const primaryCandidates = await searchYouTubeTracks(
+      primaryQuery,
+      externalSignal,
+      10,
+      'mv',
+      expectedDuration
+    );
+    let ranked = rankOfficialMusicVideoCandidates(primaryCandidates, cleanArtist, expectedDuration);
+
+    if (ranked.length === 0) {
+      const secondaryQuery = `${cleanArtist} - ${cleanTitle} Official Video`;
+      const secondaryCandidates = await searchYouTubeTracks(
+        secondaryQuery,
+        externalSignal,
+        10,
+        'mv',
+        expectedDuration
+      );
+      ranked = rankOfficialMusicVideoCandidates(secondaryCandidates, cleanArtist, expectedDuration);
+    }
+
+    if (ranked.length > 0) {
+      resolvedMusicVideoCandidatesCache.set(cacheKey, ranked.slice(0, 10));
+    }
+    return ranked.slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
 export async function resolveYouTubeMusicVideoId(
   artist: string,
   title: string,
-  externalSignal?: AbortSignal
+  externalSignal?: AbortSignal,
+  expectedDuration = 0
 ): Promise<string | null> {
-  const cleanTitle = title.replace(/\s*\([^)]*\)/g, '').trim();
-  const cleanArtist = artist.split(/,|&|\bfeat\.?\b|\bft\.?\b/i)[0].trim();
-  const cacheKey = `mv::${cleanArtist.toLowerCase()}::${cleanTitle.toLowerCase()}`;
-
-  const cached = resolvedMusicVideoIdCache.get(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const primaryQuery = `${cleanTitle} ${cleanArtist} Official Music Video`;
-    const primaryCandidates = await searchYouTubeTracks(primaryQuery, externalSignal, 10, 'mv');
-    let best = pickBestOfficialMusicVideo(primaryCandidates, cleanArtist);
-
-    if (!best) {
-      const secondaryQuery = `${cleanTitle} ${cleanArtist} Official Video`;
-      const secondaryCandidates = await searchYouTubeTracks(secondaryQuery, externalSignal, 10, 'mv');
-      best = pickBestOfficialMusicVideo(secondaryCandidates, cleanArtist);
-    }
-
-    if (!best) {
-      const tertiaryQuery = `${cleanTitle} ${cleanArtist} Official Audio`;
-      const tertiaryCandidates = await searchYouTubeTracks(tertiaryQuery, externalSignal, 8, 'mv');
-      best = pickBestOfficialMusicVideo(tertiaryCandidates, cleanArtist);
-    }
-
-    const mvId = best?.videoId || null;
-    if (mvId) {
-      resolvedMusicVideoIdCache.set(cacheKey, mvId);
-    }
-    return mvId;
-  } catch {
-    return null;
-  }
+  const candidates = await resolveYouTubeMusicVideoCandidates(
+    artist,
+    title,
+    expectedDuration,
+    externalSignal
+  );
+  return candidates[0]?.videoId || null;
 }
 
 /**
@@ -957,12 +1151,15 @@ export async function searchOnlineTracks(
   externalSignal?: AbortSignal,
   limit = 40
 ): Promise<{ tracks: Track[]; source: 'catalog' | 'client-fallback' | 'cache' }> {
-  const trimmed = query.trim();
-  if (!trimmed) {
+  const rawTrimmed = query.trim();
+  if (!rawTrimmed) {
     return { tracks: [], source: 'catalog' };
   }
 
-  const cacheKey = normalizeSearchText(trimmed);
+  const cleanedQ = getTypoQueryVariant(rawTrimmed) || rawTrimmed;
+  const trimmed = cleanedQ !== rawTrimmed ? cleanedQ : rawTrimmed;
+
+  const cacheKey = normalizeTypoSearchText(trimmed);
   const cachedHit = cacheKey ? readSearchCache(cacheKey) : null;
   if (cachedHit && cachedHit.length > 0) {
     return { tracks: cachedHit.slice(0, limit), source: 'cache' };
@@ -994,6 +1191,137 @@ export async function searchOnlineTracks(
     writeSearchCache(cacheKey, fallback);
   }
   return { tracks: fallback, source: 'client-fallback' };
+}
+
+/**
+ * Generates a Spotify-style Smart Radio Queue in the background for a chosen track:
+ * - 3-4 other popular tracks by the exact same primary artist
+ * - 6-8 tracks from genre & vibe-aligned companion artists
+ * - Strictly blocks tracks sharing the exact same title from other artists
+ */
+export async function generateSmartRadioTracks(
+  anchorTrack: Track,
+  localPool: Track[] = [],
+  externalSignal?: AbortSignal
+): Promise<Track[]> {
+  const anchorTitleKey = normalizeTitleKey(anchorTrack.title);
+  const anchorArtistName = extractPrimaryArtistName(anchorTrack.artist);
+  const anchorArtistKey = getPrimaryArtistKey(anchorTrack.artist);
+  const anchorMood = detectTrackMood(anchorTrack).mood;
+  const similarArtists = getSimilarArtistsForTrack(anchorTrack);
+  const similarArtistKeys = similarArtists.map((a) => getPrimaryArtistKey(a));
+
+  const selectedPeers = similarArtists.slice(0, 4);
+
+  const [sameArtistRes, ...peerResults] = await Promise.allSettled([
+    anchorArtistName && anchorArtistName.toLowerCase() !== 'artis'
+      ? searchOnlineTracks(anchorArtistName, externalSignal, 18)
+      : Promise.resolve({ tracks: [] as Track[] }),
+    ...selectedPeers.map((peerArtist) => searchOnlineTracks(peerArtist, externalSignal, 10)),
+  ]);
+
+  if (externalSignal?.aborted) return [];
+
+  const sameArtistFetched = sameArtistRes.status === 'fulfilled' ? sameArtistRes.value.tracks : [];
+  const peerFetched: Track[] = [];
+  for (const res of peerResults) {
+    if (res.status === 'fulfilled') {
+      peerFetched.push(...res.value.tracks);
+    }
+  }
+
+  const combinedCandidates = [
+    ...sameArtistFetched,
+    ...peerFetched,
+    ...localPool,
+  ];
+
+  const isCleanStudioCandidate = (t: Track): boolean => {
+    const raw = `${t.title} ${t.rawTitle || ''}`.toLowerCase();
+    return !/\b(karaoke|sped\s*up|slowed|reverb|cover|ringtone|tribute|parody|koplo|remix)\b/i.test(
+      raw
+    );
+  };
+
+  const seenTrackKeys = new Set<string>();
+  const sameArtistTracks: Track[] = [];
+  const peerArtistTracks: Track[] = [];
+  const peerArtistCap = new Map<string, number>();
+
+  const tryRegisterKey = (t: Track): boolean => {
+    if (!t || !t.id || t.id === anchorTrack.id) return false;
+    const tKey = normalizeTitleKey(t.title);
+    if (!tKey) return false;
+    // STRICT RULE: Never queue any track with the exact same canonical title (even from different artists)
+    if (anchorTitleKey && tKey === anchorTitleKey) return false;
+
+    const aKey = getPrimaryArtistKey(t.artist);
+    const dedupKey = `${tKey}::${aKey}`;
+    if (seenTrackKeys.has(dedupKey) || seenTrackKeys.has(`id::${t.id}`)) return false;
+    seenTrackKeys.add(dedupKey);
+    seenTrackKeys.add(`id::${t.id}`);
+    return true;
+  };
+
+  // 1. Collect 3-4 popular tracks from the exact same artist
+  const rawSameArtist = combinedCandidates.filter(
+    (t) => getPrimaryArtistKey(t.artist) === anchorArtistKey
+  );
+  // Prefer clean studio tracks first
+  rawSameArtist.sort((a, b) => Number(isCleanStudioCandidate(b)) - Number(isCleanStudioCandidate(a)));
+  for (const t of rawSameArtist) {
+    if (sameArtistTracks.length >= 4) break;
+    if (tryRegisterKey(t)) {
+      sameArtistTracks.push(t);
+    }
+  }
+
+  // 2. Collect 6-8 tracks from vibe & genre-aligned companion artists
+  const rawPeers = combinedCandidates.filter((t) => {
+    const aKey = getPrimaryArtistKey(t.artist);
+    return aKey && aKey !== anchorArtistKey;
+  });
+
+  rawPeers.sort((a, b) => {
+    const aKeyA = getPrimaryArtistKey(a.artist);
+    const aKeyB = getPrimaryArtistKey(b.artist);
+    const peerMatchA = similarArtistKeys.some((pk) => aKeyA.includes(pk) || pk.includes(aKeyA)) ? 2 : 0;
+    const peerMatchB = similarArtistKeys.some((pk) => aKeyB.includes(pk) || pk.includes(aKeyB)) ? 2 : 0;
+    const moodMatchA = detectTrackMood(a).mood === anchorMood ? 1 : 0;
+    const moodMatchB = detectTrackMood(b).mood === anchorMood ? 1 : 0;
+    const cleanA = isCleanStudioCandidate(a) ? 1 : 0;
+    const cleanB = isCleanStudioCandidate(b) ? 1 : 0;
+    return peerMatchB + moodMatchB + cleanB - (peerMatchA + moodMatchA + cleanA);
+  });
+
+  for (const t of rawPeers) {
+    if (peerArtistTracks.length >= 8) break;
+    const aKey = getPrimaryArtistKey(t.artist);
+    const countForArtist = peerArtistCap.get(aKey) || 0;
+    if (countForArtist >= 2) continue;
+    if (tryRegisterKey(t)) {
+      peerArtistCap.set(aKey, countForArtist + 1);
+      peerArtistTracks.push(t);
+    }
+  }
+
+  // 3. Interleave smoothly: 1 same-artist hit, 2 vibe-peer hits, repeat...
+  const radioQueue: Track[] = [];
+  let si = 0;
+  let pi = 0;
+  while (si < sameArtistTracks.length || pi < peerArtistTracks.length) {
+    if (si < sameArtistTracks.length) {
+      radioQueue.push(sameArtistTracks[si++]);
+    }
+    if (pi < peerArtistTracks.length) {
+      radioQueue.push(peerArtistTracks[pi++]);
+    }
+    if (pi < peerArtistTracks.length) {
+      radioQueue.push(peerArtistTracks[pi++]);
+    }
+  }
+
+  return radioQueue.slice(0, 12);
 }
 
 export async function searchTracks(

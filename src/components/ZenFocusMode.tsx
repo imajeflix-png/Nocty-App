@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Check,
   ChevronDown,
   Disc3,
   Film,
@@ -9,6 +10,7 @@ import {
   Loader2,
   Pause,
   Play,
+  RefreshCw,
   Repeat,
   Repeat1,
   Settings,
@@ -21,7 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { useNetworkMode } from '../context/NetworkModeContext';
-import { usePlayer } from '../context/PlayerContext';
+import { loadYouTubeIframeApi, usePlayer } from '../context/PlayerContext';
 import { formatDuration } from '../utils/audioUtils';
 import { triggerHaptic } from '../utils/haptics';
 import { AppleEmoji } from './AppleEmoji';
@@ -60,6 +62,8 @@ export const ZenFocusMode: React.FC = () => {
     queueTracks,
     currentMood,
     ambientVideoId,
+    ambientVideoCandidates,
+    selectAmbientVideoId,
     isResolvingAmbientVideo,
     setIsFocusMvActive,
     isAmbientVideoEnabled,
@@ -79,9 +83,12 @@ export const ZenFocusMode: React.FC = () => {
     setIsStudioSheetOpen,
     resolvedTheme,
     isDynamicThemeSync,
+    pushToast,
   } = usePlayer();
 
   const [isQueueOpen, setIsQueueOpen] = useState(false);
+  const [isMvPickerOpen, setIsMvPickerOpen] = useState(false);
+  const [mvEmbedFailed, setMvEmbedFailed] = useState(false);
   const [focusViewMode, setFocusViewMode] = useState<FocusViewMode>('cover');
   const [showcaseDragX, setShowcaseDragX] = useState(0);
   const [isDraggingShowcase, setIsDraggingShowcase] = useState(false);
@@ -93,6 +100,20 @@ export const ZenFocusMode: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const touchStartYRef = useRef<number | null>(null);
   const canSwipeDismissRef = useRef(false);
+  const mvContainerRef = useRef<HTMLDivElement>(null);
+  const mvPlayerRef = useRef<any>(null);
+  const mvPlayerReadyRef = useRef(false);
+  const failedMvIdsRef = useRef<Set<string>>(new Set());
+  const lastMvSyncAtRef = useRef<number>(0);
+
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
+  const currentTimeRef = useRef(currentTime);
+  currentTimeRef.current = currentTime;
+  const ambientVideoCandidatesRef = useRef(ambientVideoCandidates);
+  ambientVideoCandidatesRef.current = ambientVideoCandidates;
+  const selectAmbientVideoIdRef = useRef(selectAmbientVideoId);
+  selectAmbientVideoIdRef.current = selectAmbientVideoId;
 
   const showcaseTouchRef = useRef<{
     startX: number;
@@ -105,8 +126,19 @@ export const ZenFocusMode: React.FC = () => {
   }, [focusViewMode, isZenMode, setIsFocusMvActive]);
 
   useEffect(() => {
+    failedMvIdsRef.current.clear();
+    setMvEmbedFailed(false);
+    setIsMvPickerOpen(false);
+  }, [currentTrack?.id]);
+
+  useEffect(() => {
+    setMvEmbedFailed(false);
+  }, [ambientVideoId]);
+
+  useEffect(() => {
     if (!isZenMode) {
       setIsQueueOpen(false);
+      setIsMvPickerOpen(false);
       setDragOffsetY(0);
       setIsDraggingDown(false);
       setIsClosingAnim(false);
@@ -119,7 +151,9 @@ export const ZenFocusMode: React.FC = () => {
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isQueueOpen) {
+        if (isMvPickerOpen) {
+          setIsMvPickerOpen(false);
+        } else if (isQueueOpen) {
           setIsQueueOpen(false);
         } else {
           setIsZenMode(false);
@@ -128,7 +162,163 @@ export const ZenFocusMode: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isQueueOpen, isZenMode, setIsZenMode]);
+  }, [isMvPickerOpen, isQueueOpen, isZenMode, setIsZenMode]);
+
+  const wantsMvBackdrop = focusViewMode === 'mv' || isAmbientVideoEnabled;
+  const isAmbientVideoShowing =
+    isZenMode &&
+    wantsMvBackdrop &&
+    networkMode === 'normal' &&
+    !isAppInBackground &&
+    Boolean(ambientVideoId) &&
+    currentTrack?.sourceType !== 'local' &&
+    !mvEmbedFailed;
+
+  // Mount & sync YouTube IFrame Player API for Official MV background (muted, start-synced, play/pause-synced)
+  useEffect(() => {
+    const container = mvContainerRef.current;
+    if (!isAmbientVideoShowing || !ambientVideoId || !container) {
+      mvPlayerReadyRef.current = false;
+      if (mvPlayerRef.current) {
+        try {
+          mvPlayerRef.current.destroy();
+        } catch {
+          // Ignore destroy failure
+        }
+        mvPlayerRef.current = null;
+      }
+      if (container) container.innerHTML = '';
+      return;
+    }
+
+    let cancelled = false;
+    mvPlayerReadyRef.current = false;
+    container.innerHTML = '';
+    const mountEl = document.createElement('div');
+    mountEl.className = 'w-full h-full';
+    container.appendChild(mountEl);
+
+    loadYouTubeIframeApi().then(() => {
+      if (cancelled || !window.YT?.Player || !container.contains(mountEl)) return;
+
+      const startSec = Math.max(0, Math.floor(currentTimeRef.current));
+      const player = new window.YT.Player(mountEl, {
+        width: '100%',
+        height: '100%',
+        videoId: ambientVideoId,
+        playerVars: {
+          autoplay: isPlayingRef.current ? 1 : 0,
+          mute: 1,
+          controls: 0,
+          playsinline: 1,
+          rel: 0,
+          modestbranding: 1,
+          iv_load_policy: 3,
+          disablekb: 1,
+          fs: 0,
+          loop: 1,
+          playlist: ambientVideoId,
+          start: startSec,
+        },
+        events: {
+          onReady: (ev) => {
+            if (cancelled) return;
+            mvPlayerReadyRef.current = true;
+            try {
+              ev.target.mute();
+              const targetSec = Math.max(0, currentTimeRef.current);
+              if (targetSec > 1) {
+                ev.target.seekTo(targetSec, true);
+              }
+              if (isPlayingRef.current) {
+                ev.target.playVideo();
+              } else {
+                ev.target.pauseVideo();
+              }
+            } catch {
+              // Ignore YT ready sync error
+            }
+          },
+          onStateChange: (ev) => {
+            if (cancelled) return;
+            try {
+              ev.target.mute();
+              if (ev.data === 0) {
+                // Ended: loop cleanly
+                ev.target.seekTo(0, true);
+                if (isPlayingRef.current) ev.target.playVideo();
+              }
+            } catch {
+              // Ignore state sync error
+            }
+          },
+          onError: () => {
+            if (cancelled) return;
+            failedMvIdsRef.current.add(ambientVideoId);
+            const nextCandidate = ambientVideoCandidatesRef.current.find(
+              (c) => c.videoId && !failedMvIdsRef.current.has(c.videoId)
+            );
+            if (nextCandidate?.videoId) {
+              selectAmbientVideoIdRef.current(nextCandidate.videoId);
+              pushToast('Video klip utama dibatasi embed, beralih ke sumber MV lain...', 'info');
+            } else {
+              setMvEmbedFailed(true);
+            }
+          },
+        },
+      });
+
+      mvPlayerRef.current = player;
+    });
+
+    return () => {
+      cancelled = true;
+      mvPlayerReadyRef.current = false;
+      if (mvPlayerRef.current) {
+        try {
+          mvPlayerRef.current.destroy();
+        } catch {
+          // Ignore destroy failure
+        }
+        mvPlayerRef.current = null;
+      }
+      container.innerHTML = '';
+    };
+  }, [ambientVideoId, isAmbientVideoShowing, pushToast]);
+
+  // Sync Play/Pause immediately with main audio
+  useEffect(() => {
+    const player = mvPlayerRef.current;
+    if (!isAmbientVideoShowing || !mvPlayerReadyRef.current || !player) return;
+    try {
+      player.mute();
+      if (isPlaying) {
+        player.playVideo();
+      } else {
+        player.pauseVideo();
+      }
+    } catch {
+      // Ignore YT control call failure
+    }
+  }, [isPlaying, isAmbientVideoShowing]);
+
+  // Sync video timestamp when audio jumps/seeks (> 2.5s drift)
+  useEffect(() => {
+    const player = mvPlayerRef.current;
+    if (!isAmbientVideoShowing || !mvPlayerReadyRef.current || !player) return;
+    const now = Date.now();
+    if (now - lastMvSyncAtRef.current < 1200) return;
+
+    try {
+      const mvSec = typeof player.getCurrentTime === 'function' ? player.getCurrentTime() : 0;
+      if (Number.isFinite(mvSec) && Math.abs(mvSec - currentTime) > 2.5) {
+        lastMvSyncAtRef.current = now;
+        player.seekTo(Math.max(0, currentTime), true);
+      }
+    } catch {
+      // Ignore seek sync failure
+    }
+  }, [currentTime, isAmbientVideoShowing]);
 
   if (!isZenMode) return null;
 
@@ -136,14 +326,6 @@ export const ZenFocusMode: React.FC = () => {
   const liked = currentTrack ? isLiked(currentTrack.id) : false;
   const { primary, secondary, gradientIntensity } = ambientPalette;
   const accentStyleColor = isDynamicThemeSync ? primary.hex : undefined;
-
-  const wantsMvBackdrop = focusViewMode === 'mv' || isAmbientVideoEnabled;
-  const isAmbientVideoShowing =
-    wantsMvBackdrop &&
-    networkMode === 'normal' &&
-    !isAppInBackground &&
-    Boolean(ambientVideoId) &&
-    currentTrack?.sourceType !== 'local';
 
   const selectFocusMode = (nextMode: FocusViewMode) => {
     if (nextMode === focusViewMode) return;
@@ -290,15 +472,11 @@ export const ZenFocusMode: React.FC = () => {
       >
         {isAmbientVideoShowing && ambientVideoId ? (
           <>
-            <iframe
-              key={`zen-mv-${ambientVideoId}`}
-              title="Official Music Video Background"
-              src={`https://www.youtube.com/embed/${ambientVideoId}?autoplay=1&mute=1&loop=1&playlist=${ambientVideoId}&controls=0&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1`}
-              allow="autoplay; encrypted-media; picture-in-picture"
-              tabIndex={-1}
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full w-[177.78vh] h-[56.25vw] scale-115 opacity-80 pointer-events-none border-0"
+            <div
+              ref={mvContainerRef}
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full w-[177.78vh] h-[56.25vw] scale-[1.24] opacity-90 pointer-events-none [&>iframe]:w-full [&>iframe]:h-full [&>iframe]:border-0"
             />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/65 via-black/30 to-[#0B0B0D]/95" />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/15 to-[#08080A]/92" />
           </>
         ) : (
           <div
@@ -379,6 +557,20 @@ export const ZenFocusMode: React.FC = () => {
           </button>
         </div>
       </header>
+
+      {/* Quick Corner Action: Ganti Sumber MV when Official MV mode is active */}
+      {focusViewMode === 'mv' &&
+        currentTrack?.sourceType !== 'local' &&
+        networkMode === 'normal' && (
+          <button
+            type="button"
+            onClick={() => setIsMvPickerOpen(true)}
+            className="absolute top-[74px] right-4 sm:right-8 z-20 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-xl border border-white/15 text-[11px] font-medium text-white shadow-lg transition-colors"
+          >
+            <RefreshCw className="w-3 h-3" strokeWidth={2} />
+            <span>Ganti Sumber MV</span>
+          </button>
+        )}
 
       {/* Single Scrollable Vertical Layout: Mode Switcher + Swipeable Showcase -> Title/Artist -> Progress & Controls -> Studio -> Lyrics */}
       <div
@@ -524,21 +716,16 @@ export const ZenFocusMode: React.FC = () => {
             )}
 
             {focusViewMode === 'mv' && (
-              <div className="on-artwork relative w-60 h-60 sm:w-72 sm:h-72 lg:w-80 lg:h-80 rounded-3xl bg-black/30 backdrop-blur-md border border-white/[0.16] shadow-[0_24px_60px_rgba(0,0,0,0.55)] overflow-hidden flex flex-col items-center justify-center p-5 text-center">
+              <div className="on-artwork relative w-60 h-60 sm:w-72 sm:h-72 lg:w-80 lg:h-80 rounded-3xl overflow-hidden flex flex-col items-center justify-center p-5 text-center">
                 {isAmbientVideoShowing ? (
-                  <>
-                    <div className="w-12 h-12 rounded-full bg-white/12 border border-white/20 flex items-center justify-center mb-3 backdrop-blur-xl">
-                      <Film className="w-5 h-5 text-white" strokeWidth={1.9} />
-                    </div>
-                    <p className="text-sm font-semibold text-white">
-                      Official Music Video Aktif
-                    </p>
-                    <p className="text-xs text-white/65 mt-1 leading-relaxed max-w-[210px]">
-                      Video resmi diputar di latar belakang tanpa suara untuk menjaga kualitas audio utama.
-                    </p>
-                  </>
+                  <div className="w-full h-full flex flex-col items-center justify-end pb-2">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/45 backdrop-blur-md border border-white/15 text-[11px] font-medium text-white/90">
+                      <Film className="w-3 h-3" strokeWidth={2} />
+                      <span>Official MV · Tanpa Suara</span>
+                    </span>
+                  </div>
                 ) : (
-                  <>
+                  <div className="w-full h-full rounded-3xl bg-black/45 backdrop-blur-md border border-white/[0.14] flex flex-col items-center justify-center p-5">
                     <CoverArt
                       src={currentTrack?.coverUrl}
                       alt={currentTrack?.title || 'Official MV'}
@@ -552,15 +739,29 @@ export const ZenFocusMode: React.FC = () => {
                         <span>Mencari Official Music Video...</span>
                       </div>
                     ) : (
-                      <p className="text-xs text-white/70 leading-relaxed max-w-[220px]">
-                        {currentTrack?.sourceType === 'local'
-                          ? 'File MP3 lokal tidak memiliki video klip YouTube.'
-                          : networkMode === 'lite'
-                            ? 'Video nonaktif saat Mode Ringan hemat kuota aktif.'
-                            : 'Official Music Video resmi belum ditemukan untuk lagu ini.'}
-                      </p>
+                      <div className="space-y-2.5">
+                        <p className="text-xs text-white/75 leading-relaxed max-w-[220px]">
+                          {currentTrack?.sourceType === 'local'
+                            ? 'File MP3 lokal tidak memiliki video klip YouTube.'
+                            : networkMode === 'lite'
+                              ? 'Video nonaktif saat Mode Ringan hemat kuota aktif.'
+                              : mvEmbedFailed
+                                ? 'Video klip utama diblokir untuk embed. Coba pilih sumber MV lain.'
+                                : 'Official Music Video resmi belum ditemukan untuk lagu ini.'}
+                        </p>
+                        {ambientVideoCandidates.length > 0 && networkMode === 'normal' && (
+                          <button
+                            type="button"
+                            onClick={() => setIsMvPickerOpen(true)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/20 text-[11px] font-semibold text-white transition-colors"
+                          >
+                            <RefreshCw className="w-3 h-3" strokeWidth={2} />
+                            <span>Ganti Sumber MV</span>
+                          </button>
+                        )}
+                      </div>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
             )}
@@ -881,6 +1082,99 @@ export const ZenFocusMode: React.FC = () => {
         </div>
       )}
 
+      {/* MV Source Picker Overlay (opened via 'Ganti Sumber MV') */}
+      {isMvPickerOpen && (
+        <div
+          className="fixed inset-0 z-30 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/65 backdrop-blur-sm"
+          onClick={() => setIsMvPickerOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Pilih Sumber Official MV"
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full sm:max-w-md max-h-[72vh] rounded-t-3xl sm:rounded-3xl bg-[#121216]/95 backdrop-blur-xl border border-white/[0.12] shadow-2xl overflow-hidden flex flex-col"
+          >
+            <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-white/[0.08] shrink-0">
+              <div>
+                <h2 className="font-display text-base font-semibold text-white">
+                  Ganti Sumber MV
+                </h2>
+                <p className="text-[11px] text-zinc-400">
+                  Pilih video klip alternatif jika video utama diblokir embed
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMvPickerOpen(false)}
+                aria-label="Tutup pilihan sumber MV"
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/16 flex items-center justify-center text-white/75 hover:text-white transition-colors shrink-0"
+              >
+                <X className="w-4 h-4" strokeWidth={1.9} />
+              </button>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1.5">
+              {isResolvingAmbientVideo ? (
+                <div className="py-10 flex items-center justify-center gap-2 text-xs text-zinc-400">
+                  <Loader2 className="w-4 h-4 animate-spin" strokeWidth={2} />
+                  <span>Memuat daftar kandidat Official MV...</span>
+                </div>
+              ) : ambientVideoCandidates.length === 0 ? (
+                <div className="py-10 text-center px-4">
+                  <p className="text-sm text-zinc-300">Belum ada kandidat video klip yang lolos filter.</p>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Audio/Static/Lyrics/Topic otomatis disaring agar hanya video klip bergerak yang tampil.
+                  </p>
+                </div>
+              ) : (
+                ambientVideoCandidates.map((cand) => {
+                  const selected = cand.videoId === ambientVideoId;
+                  return (
+                    <button
+                      key={cand.videoId || cand.id}
+                      type="button"
+                      onClick={() => {
+                        if (!cand.videoId) return;
+                        triggerHaptic(12);
+                        setMvEmbedFailed(false);
+                        selectAmbientVideoId(cand.videoId);
+                        setIsMvPickerOpen(false);
+                      }}
+                      className={`w-full flex items-center gap-3 p-2.5 rounded-2xl text-left transition-colors ${
+                        selected
+                          ? 'bg-white/12 border border-white/20'
+                          : 'hover:bg-white/[0.06] border border-transparent'
+                      }`}
+                    >
+                      <CoverArt
+                        src={cand.coverUrl}
+                        alt={cand.rawTitle || cand.title}
+                        className="w-16 h-10 shrink-0"
+                        roundedClass="rounded-lg"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-white line-clamp-1">
+                          {cand.rawTitle || cand.title}
+                        </p>
+                        <p className="text-[11px] text-zinc-400 truncate mt-0.5">
+                          {cand.channelName || cand.artist} ·{' '}
+                          <span className="font-mono-tabular">{formatDuration(cand.duration)}</span>
+                        </p>
+                      </div>
+                      {selected && (
+                        <span className="w-6 h-6 rounded-full bg-white text-[#0B0B0D] flex items-center justify-center shrink-0">
+                          <Check className="w-3.5 h-3.5" strokeWidth={2.4} />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

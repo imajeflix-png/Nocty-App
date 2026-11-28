@@ -241,44 +241,49 @@ async function renderNocturnalAuraBase(
   const cardH = 1040;
   drawGlassBox(cardX, cardY, cardW, cardH, 48);
 
-  const innerLeft = cardX + 52;
-  const innerRight = cardX + cardW - 52;
+  const innerLeft = cardX + 48;
+  const innerRight = cardX + cardW - 48;
   const innerW = innerRight - innerLeft;
 
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.56)';
-  ctx.font = `600 22px ${RECEIPT_FONT_STACK}`;
-  ctx.fillText('NO   TRACK / ARTIST', innerLeft, cardY + 46);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+  ctx.font = `700 24px ${RECEIPT_FONT_STACK}`;
+  ctx.fillText('NO   TRACK / ARTIST', innerLeft, cardY + 42);
   ctx.textAlign = 'right';
-  ctx.fillText('DURATION', innerRight, cardY + 46);
+  ctx.fillText('TIME', innerRight, cardY + 42);
 
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
-  ctx.lineWidth = 2;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([12, 8]);
   ctx.beginPath();
-  ctx.moveTo(innerLeft, cardY + 88);
-  ctx.lineTo(innerRight, cardY + 88);
+  ctx.moveTo(innerLeft, cardY + 84);
+  ctx.lineTo(innerRight, cardY + 84);
   ctx.stroke();
+  ctx.restore();
 
-  const rowsTop = cardY + 118;
-  const rowsBottom = cardY + cardH - 122;
-  const availableH = rowsBottom - rowsTop;
+  const rowsTop = cardY + 108;
+  const summaryLineY = cardY + cardH - 102;
+  const availableH = Math.max(120, summaryLineY - 14 - rowsTop);
   const count = Math.max(1, visibleTracks.length);
-  const rowStep = availableH / count;
+  const itemBlockH = 60; // 32px title + 2px gap + 24px artist
+  const denseGap = Math.min(26, Math.max(12, Math.floor((availableH - count * itemBlockH) / Math.max(1, count))));
+  const rowStep = itemBlockH + denseGap;
 
   if (visibleTracks.length === 0) {
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
-    ctx.font = `500 28px ${SANS_FONT_STACK}`;
+    ctx.font = `600 28px ${SANS_FONT_STACK}`;
     ctx.fillText('BELUM ADA LAGU DIPILIH', width / 2, rowsTop + availableH / 2 - 16);
   } else {
     for (let i = 0; i < visibleTracks.length; i++) {
       const t = visibleTracks[i];
-      const ry = rowsTop + i * rowStep + Math.max(0, (rowStep - 96) / 2);
+      const ry = rowsTop + i * rowStep;
 
       if (i > 0) {
-        const divY = rowsTop + i * rowStep - 4;
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        const divY = ry - Math.round(denseGap / 2);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(innerLeft, divY);
@@ -288,56 +293,58 @@ async function renderNocturnalAuraBase(
 
       // Track index
       ctx.textAlign = 'left';
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.48)';
-      ctx.font = `700 28px ${RECEIPT_FONT_STACK}`;
-      ctx.fillText(String(i + 1).padStart(2, '0'), innerLeft, ry + 6);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = `800 32px ${RECEIPT_FONT_STACK}`;
+      ctx.fillText(String(i + 1).padStart(2, '0'), innerLeft, ry);
 
       // Duration
       ctx.textAlign = 'right';
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
       ctx.font = `700 26px ${RECEIPT_FONT_STACK}`;
-      ctx.fillText(formatDuration(t.duration || 0), innerRight, ry + 6);
+      ctx.fillText(formatDuration(t.duration || 0), innerRight, ry + 3);
 
       // Title & Artist
-      const textX = innerLeft + 62;
-      const textMaxW = innerW - 62 - 120;
+      const textX = innerLeft + 58;
+      const textMaxW = innerW - 58 - 108;
       ctx.textAlign = 'left';
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = `700 32px ${DISPLAY_FONT_STACK}`;
-      ctx.fillText(fitTextWithEllipsis(ctx, t.title, textMaxW), textX, ry);
+      ctx.font = `800 32px ${DISPLAY_FONT_STACK}`;
+      ctx.fillText(fitTextWithEllipsis(ctx, t.title.toUpperCase(), textMaxW), textX, ry);
 
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.66)';
-      ctx.font = `500 25px ${SANS_FONT_STACK}`;
-      ctx.fillText(fitTextWithEllipsis(ctx, t.artist, textMaxW), textX, ry + 44);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.74)';
+      ctx.font = `600 24px ${SANS_FONT_STACK}`;
+      ctx.fillText(fitTextWithEllipsis(ctx, t.artist, textMaxW), textX, ry + 34);
     }
   }
 
-  // Card bottom summary divider
-  const summaryLineY = cardY + cardH - 100;
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
-  ctx.lineWidth = 2;
+  // Card bottom summary full-width dashed divider
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([12, 8]);
   ctx.beginPath();
   ctx.moveTo(innerLeft, summaryLineY);
   ctx.lineTo(innerRight, summaryLineY);
   ctx.stroke();
+  ctx.restore();
 
   ctx.textBaseline = 'top';
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
-  ctx.font = `700 24px ${RECEIPT_FONT_STACK}`;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = `700 25px ${RECEIPT_FONT_STACK}`;
   ctx.textAlign = 'left';
-  ctx.fillText(`ITEM COUNT: ${visibleTracks.length}`, innerLeft, summaryLineY + 28);
+  ctx.fillText(`ITEM COUNT: ${visibleTracks.length}`, innerLeft, summaryLineY + 26);
   ctx.textAlign = 'right';
-  ctx.fillText(`TOTAL: ${formatDuration(totalSeconds)}`, innerRight, summaryLineY + 28);
+  ctx.fillText(`TOTAL: ${formatDuration(totalSeconds)}`, innerRight, summaryLineY + 26);
 
-  // 4. Crisp White Code 128 Barcode inside Dark Liquid Glass Dock at bottom
+  // 4. Crisp White Code 128 Barcode inside Dark Liquid Glass Dock at bottom (85% card width, 80px tall)
   const barcodeCardY = 1468;
   const barcodeCardH = 290;
   drawGlassBox(cardX, barcodeCardY, cardW, barcodeCardH, 42);
 
-  const barcodeDrawW = cardW - 140;
-  const barcodeDrawH = template.barcodeHeightPx * 2 + 20;
-  const barcodeDrawX = cardX + 70;
-  const barcodeDrawY = barcodeCardY + 52;
+  const barcodeDrawW = Math.round(cardW * 0.85);
+  const barcodeDrawH = template.barcodeHeightPx * 2;
+  const barcodeDrawX = cardX + Math.round((cardW - barcodeDrawW) / 2);
+  const barcodeDrawY = barcodeCardY + 62;
   drawCode128ToCanvas(
     ctx,
     params.barcodePayload,
@@ -350,9 +357,9 @@ async function renderNocturnalAuraBase(
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.84)';
-  ctx.font = `700 22px ${RECEIPT_FONT_STACK}`;
-  ctx.fillText(params.serialCode, width / 2, barcodeCardY + 216);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+  ctx.font = `700 20px ${RECEIPT_FONT_STACK}`;
+  ctx.fillText(params.serialCode, width / 2, barcodeDrawY + barcodeDrawH + 18);
 
   // Subtle Nocty watermark
   ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
@@ -434,56 +441,72 @@ export async function renderSlipNoctyPng(params: SlipRenderParams): Promise<Slip
     ctx.rect(0, 0, zoneW, zoneH);
     ctx.clip();
 
-    const padLeft = (safeZone.padXPx ?? 10) * 2;
-    const padRight = (safeZone.padRightPx ?? safeZone.padXPx ?? 10) * 2;
-    const padY = (safeZone.padYPx ?? 4) * 2;
+    const padLeft = (safeZone.padXPx ?? 9) * 2;
+    const padRight = (safeZone.padRightPx ?? safeZone.padXPx ?? 9) * 2;
+    const padY = (safeZone.padYPx ?? 3) * 2;
     const innerW = zoneW - padLeft - padRight;
     const innerH = zoneH - padY * 2;
     const left = padLeft;
     const right = padLeft + innerW;
 
-    ctx.globalAlpha = 0.92;
-    ctx.fillStyle = '#1A1A1A';
     ctx.textBaseline = 'top';
 
-    const compactFactor =
-      templateId === 'denim-patches' ? 0.86 : templateId === 'editorial-basket' ? 0.92 : 0.96;
-    const metaSize = Math.round(18 * compactFactor);
-    const headerSize = Math.round(16 * compactFactor);
-    const trackSize = Math.round(20 * compactFactor);
-    const artistSize = Math.round(15 * compactFactor);
-    const footerSize = Math.round(17 * compactFactor);
-    const serialSize = Math.round(15 * compactFactor);
+    const templateTypography =
+      templateId === 'denim-patches'
+        ? { meta: 24, header: 21, track: 28, artist: 22, duration: 24, footer: 24, serial: 20, gap: 10 }
+        : templateId === 'editorial-basket'
+          ? { meta: 25, header: 22, track: 30, artist: 23, duration: 25, footer: 25, serial: 20, gap: 13 }
+          : { meta: 26, header: 23, track: 32, artist: 24, duration: 26, footer: 26, serial: 20, gap: 15 };
+
+    const { meta: metaSize, header: headerSize, track: trackSize, artist: artistSize, duration: durationSize, footer: footerSize, serial: serialSize } =
+      templateTypography;
+
+    const drawInkText = (
+      text: string,
+      x: number,
+      y: number,
+      color: string,
+      bleedAlpha = 0.24
+    ) => {
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.shadowColor = `rgba(17, 17, 17, ${bleedAlpha})`;
+      ctx.shadowBlur = 1.8;
+      ctx.shadowOffsetX = 0.4;
+      ctx.shadowOffsetY = 0.4;
+      ctx.fillText(text, x, y);
+      ctx.restore();
+    };
 
     let cursorY = padY;
 
-    // Order & Date row
-    ctx.font = `700 ${metaSize}px ${RECEIPT_FONT_STACK}`;
+    // Order & Date row (24px–26px bold #111111)
+    ctx.font = `800 ${metaSize}px ${RECEIPT_FONT_STACK}`;
     ctx.textAlign = 'left';
-    ctx.fillText(`ORDER #${orderCode}`, left, cursorY);
+    drawInkText(`ORDER #${orderCode}`, left, cursorY, '#111111');
     ctx.textAlign = 'right';
-    ctx.fillText(dateLabel, right, cursorY);
-    cursorY += Math.round(metaSize * 1.42);
+    drawInkText(dateLabel, right, cursorY, '#111111');
+    cursorY += Math.round(metaSize * 1.24);
 
     // Column headers: NO | TRACK / ARTIST | TIME
-    const noColW = Math.round(36 * compactFactor);
-    const timeColW = Math.round(76 * compactFactor);
+    const noColW = Math.round(trackSize * 1.62);
+    const timeColW = Math.round(durationSize * 3.55);
     const trackColX = left + noColW;
-    const trackColMaxW = innerW - noColW - timeColW - 8;
+    const trackColMaxW = innerW - noColW - timeColW - 10;
 
-    ctx.font = `700 ${headerSize}px ${RECEIPT_FONT_STACK}`;
+    ctx.font = `800 ${headerSize}px ${RECEIPT_FONT_STACK}`;
     ctx.textAlign = 'left';
-    ctx.fillText('NO', left, cursorY);
-    ctx.fillText('TRACK / ARTIST', trackColX, cursorY);
+    drawInkText('NO', left, cursorY, '#111111');
+    drawInkText('TRACK / ARTIST', trackColX, cursorY, '#111111');
     ctx.textAlign = 'right';
-    ctx.fillText('TIME', right, cursorY);
-    cursorY += Math.round(headerSize * 1.3);
+    drawInkText('TIME', right, cursorY, '#111111');
+    cursorY += Math.round(headerSize * 1.24);
 
     const drawDashedLine = (yPos: number) => {
       ctx.save();
-      ctx.strokeStyle = 'rgba(26, 26, 26, 0.55)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([8, 6]);
+      ctx.strokeStyle = 'rgba(26, 26, 26, 0.70)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([12, 8]);
       ctx.beginPath();
       ctx.moveTo(left, yPos);
       ctx.lineTo(right, yPos);
@@ -492,76 +515,88 @@ export async function renderSlipNoctyPng(params: SlipRenderParams): Promise<Slip
     };
 
     drawDashedLine(cursorY);
-    cursorY += Math.round(10 * compactFactor);
+    cursorY += 10;
 
-    const barcodeHeight = template.barcodeHeightPx * 2;
-    const footerSummaryH = Math.round(footerSize * 1.45 + 14 * compactFactor);
-    const barcodeBlockH = barcodeHeight + Math.round(serialSize * 1.4 + 8);
-    const reservedBottomH = footerSummaryH + barcodeBlockH + 8;
-    const availableRowsH = Math.max(60, padY + innerH - cursorY - reservedBottomH);
+    const barcodeHeight = template.barcodeHeightPx * 2; // 68px–80px at 1080x1920
+    const footerLineGap = 8;
+    const footerSummaryH = footerLineGap + Math.round(footerSize * 1.26) + 8;
+    const barcodeBlockH = barcodeHeight + 6 + Math.round(serialSize * 1.15);
+    const reservedBottomH = footerSummaryH + barcodeBlockH + 4;
+    const availableRowsH = Math.max(70, padY + innerH - cursorY - reservedBottomH);
     const rowCount = Math.max(1, visibleTracks.length);
-    const rowStep = availableRowsH / rowCount;
-    const showTwoLineTrack = rowStep >= trackSize + artistSize + 12;
+
+    const artistOffsetY = trackSize + 2; // tight 2px gap between title and artist
+    const twoLineBlockH = artistOffsetY + artistSize;
+    const maxStepForRows = availableRowsH / rowCount;
+    const showTwoLineTrack = maxStepForRows >= twoLineBlockH + 2;
+    const tightStep = showTwoLineTrack
+      ? Math.min(twoLineBlockH + templateTypography.gap, maxStepForRows)
+      : Math.min(trackSize + 10, maxStepForRows);
 
     if (visibleTracks.length === 0) {
-      ctx.font = `400 ${trackSize}px ${RECEIPT_FONT_STACK}`;
+      ctx.font = `600 ${trackSize}px ${RECEIPT_FONT_STACK}`;
       ctx.textAlign = 'center';
-      ctx.fillText(
+      drawInkText(
         'BELUM ADA LAGU DIPILIH',
         left + innerW / 2,
-        cursorY + availableRowsH / 2 - trackSize / 2
+        cursorY + Math.max(12, availableRowsH / 2 - trackSize / 2),
+        '#111111'
       );
     } else {
       for (let i = 0; i < visibleTracks.length; i++) {
         const t = visibleTracks[i];
-        const rowY = cursorY + i * rowStep;
+        const rowY = cursorY + i * tightStep;
 
-        ctx.font = `700 ${trackSize}px ${RECEIPT_FONT_STACK}`;
+        // Track index ("01")
+        ctx.font = `800 ${trackSize}px ${RECEIPT_FONT_STACK}`;
         ctx.textAlign = 'left';
-        ctx.fillText(String(i + 1).padStart(2, '0'), left, rowY);
+        drawInkText(String(i + 1).padStart(2, '0'), left, rowY, '#111111');
 
+        // Duration ("3:56")
+        ctx.font = `800 ${durationSize}px ${RECEIPT_FONT_STACK}`;
         ctx.textAlign = 'right';
-        ctx.fillText(formatDuration(t.duration || 0), right, rowY);
+        drawInkText(formatDuration(t.duration || 0), right, rowY + Math.round((trackSize - durationSize) / 2), '#111111');
 
         ctx.textAlign = 'left';
         if (showTwoLineTrack) {
-          ctx.font = `700 ${trackSize}px ${RECEIPT_FONT_STACK}`;
-          ctx.fillText(
+          ctx.font = `800 ${trackSize}px ${RECEIPT_FONT_STACK}`;
+          drawInkText(
             fitTextWithEllipsis(ctx, t.title.toUpperCase(), trackColMaxW),
             trackColX,
-            rowY
+            rowY,
+            '#111111',
+            0.26
           );
 
-          ctx.save();
-          ctx.globalAlpha = 0.72;
-          ctx.font = `400 ${artistSize}px ${RECEIPT_FONT_STACK}`;
-          ctx.fillText(
+          ctx.font = `600 ${artistSize}px ${RECEIPT_FONT_STACK}`;
+          drawInkText(
             fitTextWithEllipsis(ctx, t.artist, trackColMaxW),
             trackColX,
-            rowY + Math.round(trackSize * 1.12)
+            rowY + artistOffsetY,
+            '#333333',
+            0.14
           );
-          ctx.restore();
         } else {
-          ctx.font = `700 ${trackSize}px ${RECEIPT_FONT_STACK}`;
+          ctx.font = `800 ${trackSize}px ${RECEIPT_FONT_STACK}`;
           const combined = `${t.title.toUpperCase()} - ${t.artist}`;
-          ctx.fillText(fitTextWithEllipsis(ctx, combined, trackColMaxW), trackColX, rowY);
+          drawInkText(fitTextWithEllipsis(ctx, combined, trackColMaxW), trackColX, rowY, '#111111');
         }
       }
     }
 
-    const summaryStartY = padY + innerH - reservedBottomH + 4;
+    const summaryStartY = padY + innerH - reservedBottomH;
     drawDashedLine(summaryStartY);
 
-    const countTextY = summaryStartY + Math.round(12 * compactFactor);
-    ctx.font = `700 ${footerSize}px ${RECEIPT_FONT_STACK}`;
+    const countTextY = summaryStartY + footerLineGap;
+    ctx.font = `800 ${footerSize}px ${RECEIPT_FONT_STACK}`;
     ctx.textAlign = 'left';
-    ctx.fillText(`ITEM COUNT: ${visibleTracks.length}`, left, countTextY);
+    drawInkText(`ITEM COUNT: ${visibleTracks.length}`, left, countTextY, '#111111');
     ctx.textAlign = 'right';
-    ctx.fillText(`TOTAL: ${formatDuration(totalSeconds)}`, right, countTextY);
+    drawInkText(`TOTAL: ${formatDuration(totalSeconds)}`, right, countTextY, '#111111');
 
-    const barcodeTopY = countTextY + Math.round(footerSize * 1.45);
-    const barcodeMaxW = Math.min(innerW * 0.94, 520);
-    const barcodeX = left + (innerW - barcodeMaxW) / 2;
+    const barcodeTopY = countTextY + Math.round(footerSize * 1.26) + 6;
+    const barcodeMaxW = Math.round(innerW * 0.85);
+    const barcodeX = left + Math.round((innerW - barcodeMaxW) / 2);
 
     drawCode128ToCanvas(
       ctx,
@@ -570,12 +605,12 @@ export async function renderSlipNoctyPng(params: SlipRenderParams): Promise<Slip
       barcodeTopY,
       barcodeMaxW,
       barcodeHeight,
-      '#1A1A1A'
+      '#111111'
     );
 
-    ctx.font = `700 ${serialSize}px ${RECEIPT_FONT_STACK}`;
+    ctx.font = `800 ${serialSize}px ${RECEIPT_FONT_STACK}`;
     ctx.textAlign = 'center';
-    ctx.fillText(serialCode, left + innerW / 2, barcodeTopY + barcodeHeight + 8);
+    drawInkText(serialCode, left + innerW / 2, barcodeTopY + barcodeHeight + 6, '#111111', 0.16);
 
     ctx.restore();
   }
