@@ -224,7 +224,7 @@ export const ExploreView: React.FC = () => {
   const showCuratedLoading = isChannelLoading || (isTrendingLoading && channelTracks.length === 0);
 
   return (
-    <div className="space-y-8 pb-8">
+    <div className="space-y-8 pb-44 lg:pb-12">
       <div className="space-y-4">
         <div>
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-white tracking-tight">
@@ -235,10 +235,10 @@ export const ExploreView: React.FC = () => {
           </p>
         </div>
 
-        {/* Mobile Search Pill */}
+        {/* Mobile Concave Liquid Glass Search Pill */}
         <div className="relative sm:hidden">
           <Search
-            className="w-4 h-4 text-white/45 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"
+            className="w-4 h-4 text-white/55 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none z-10"
             strokeWidth={1.9}
           />
           <input
@@ -252,7 +252,7 @@ export const ExploreView: React.FC = () => {
             }}
             placeholder="Ketik judul, artis, atau lirik..."
             aria-label="Cari lagu, artis, atau lirik"
-            className="w-full h-11 pl-11 pr-10 rounded-full bg-white/[0.06] border border-white/[0.08] text-sm text-white placeholder-white/40 focus:outline-none focus:border-white/25"
+            className="w-full h-11 pl-11 pr-10 rounded-full bg-white/[0.07] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.28)] text-sm text-white placeholder-white/45 focus:outline-none focus:border-white/30"
           />
           {searchQuery && (
             <button
@@ -280,8 +280,8 @@ export const ExploreView: React.FC = () => {
                 }}
                 className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${
                   selected
-                    ? 'bg-white text-[#0B0B0D]'
-                    : 'bg-white/10 hover:bg-white/15 text-white/80 hover:text-white border border-white/[0.08]'
+                    ? 'bg-white text-[#0B0B0D] shadow-[0_6px_18px_rgba(255,255,255,0.22)]'
+                    : 'bg-white/[0.07] hover:bg-white/[0.14] backdrop-blur-2xl text-white/85 hover:text-white border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.22)]'
                 }`}
               >
                 {channel.label}

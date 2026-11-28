@@ -14,7 +14,7 @@ export const LibraryView: React.FC = () => {
     setActiveView,
     openPlaylist,
     setIsCreatePlaylistOpen,
-    setIsWeeklyAuraOpen,
+    setIsStudioSheetOpen,
     uploadLocalFiles,
   } = usePlayer();
 
@@ -30,7 +30,7 @@ export const LibraryView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8 pb-10">
+    <div className="space-y-8 pb-44 lg:pb-12">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-white tracking-tight">
@@ -70,11 +70,11 @@ export const LibraryView: React.FC = () => {
         </div>
       </div>
 
-      {/* Nocty Weekly Aura Interactive Banner */}
+      {/* Nocty Studio Unified Banner (Slip Nocty & Nocturnal Aura 9:16) */}
       <button
         type="button"
-        onClick={() => setIsWeeklyAuraOpen(true)}
-        className="group relative w-full overflow-hidden rounded-2xl bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.10] p-5 text-left transition-all shadow-lg"
+        onClick={() => setIsStudioSheetOpen(true)}
+        className="group relative w-full overflow-hidden rounded-[28px] bg-white/[0.07] hover:bg-white/[0.11] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] p-5 text-left transition-all"
       >
         <div
           aria-hidden="true"
@@ -85,17 +85,17 @@ export const LibraryView: React.FC = () => {
         />
         <div className="relative z-10 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3.5 min-w-0">
-            <span className="w-12 h-12 rounded-2xl bg-white/12 border border-white/[0.14] flex items-center justify-center shrink-0">
+            <span className="w-12 h-12 rounded-2xl bg-white/12 border border-white/[0.18] flex items-center justify-center shrink-0">
               <AppleEmoji unified="2728" size={22} />
             </span>
             <div className="min-w-0">
               <p className="font-display text-sm sm:text-base font-bold text-white flex items-center gap-1.5 truncate">
-                <span>Nocty Weekly Aura — Cek Raport Musikmu</span>
+                <span>✦ Nocty Studio — Slip Nocty &amp; Nocturnal Aura</span>
               </p>
               <p className="text-xs text-white/60 truncate mt-0.5">
                 {weeklyReport.hasEnoughData
-                  ? `${weeklyReport.auraTitle} · ${weeklyReport.formattedTotalTime} minggu ini`
-                  : 'Analisis vibe, jam dengar, & kartu IG Story 9:16'}
+                  ? `${weeklyReport.auraTitle} · Cetak struk & kartu 9:16 siap IG Story`
+                  : 'Cetak struk musik 9:16, Nocturnal Aura & barcode Code 128'}
               </p>
             </div>
           </div>
@@ -108,7 +108,7 @@ export const LibraryView: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveView('liked')}
-          className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.08] transition-all text-left"
+          className="flex items-center justify-between gap-4 p-4 rounded-3xl bg-white/[0.06] hover:bg-white/[0.10] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.3),0_10px_28px_rgba(0,0,0,0.4)] transition-all text-left"
         >
           <div className="flex items-center gap-3.5 min-w-0">
             <span className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
@@ -129,7 +129,7 @@ export const LibraryView: React.FC = () => {
             key={pl.id}
             type="button"
             onClick={() => openPlaylist(pl.id)}
-            className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.05] hover:bg-white/[0.09] border border-white/[0.08] transition-all text-left"
+            className="flex items-center justify-between gap-4 p-4 rounded-3xl bg-white/[0.06] hover:bg-white/[0.10] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.3),0_10px_28px_rgba(0,0,0,0.4)] transition-all text-left"
           >
             <div className="flex items-center gap-3.5 min-w-0">
               <span className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center shrink-0">

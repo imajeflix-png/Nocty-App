@@ -17,6 +17,7 @@ import {
   Track,
 } from '../types/music';
 import { DEFAULT_COVER_URL, EMERGENCY_FALLBACK_TRACKS } from '../data/moods';
+import { triggerHaptic } from '../utils/haptics';
 import {
   ListeningHistoryEntry,
   deleteLocalTrackFromDb,
@@ -58,6 +59,8 @@ import {
   smartShuffleTracks,
 } from '../utils/audioUtils';
 import { generateSimulatedWeeklyHistory } from '../utils/weeklyAuraUtils';
+import { useNetworkMode } from './NetworkModeContext';
+import { useSettings } from './SettingsContext';
 
 interface YTPlayerInstance {
   loadVideoById: (arg: string | { videoId: string; startSeconds?: number }) => void;
@@ -66,6 +69,7 @@ interface YTPlayerInstance {
   stopVideo: () => void;
   seekTo: (seconds: number, allowSeekAhead?: boolean) => void;
   setVolume: (volume: number) => void;
+  setPlaybackQuality?: (suggestedQuality: string) => void;
   mute: () => void;
   unMute: () => void;
   getCurrentTime: () => number;
@@ -105,10 +109,18 @@ interface DynamicIslandPluginBridge {
     artist: string;
     isPlaying: boolean;
     artwork: string;
+    showOverlay?: boolean;
   }) => Promise<{ canDrawOverlays?: boolean }>;
   hide?: () => Promise<void>;
   checkOverlayPermission?: () => Promise<{ granted: boolean }>;
   requestOverlayPermission?: () => Promise<void>;
+  checkSystemPermissions?: () => Promise<{
+    notifications?: 'granted' | 'prompt' | 'denied';
+    camera?: 'granted' | 'prompt' | 'denied';
+    overlay?: 'granted' | 'prompt' | 'denied';
+  }>;
+  requestNotificationPermission?: () => Promise<{ state?: 'granted' | 'denied' }>;
+  openAppSettings?: () => Promise<void>;
   addListener?: (
     eventName: 'islandAction',
     listenerFunc: (data: { action: string }) => void
@@ -137,6 +149,15 @@ interface ToastMessage {
 type PlaybackEngine = 'youtube' | 'html5' | null;
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
+
+export interface MoodSessionProfile {
+  energy: string;
+  tempoBpm: number;
+  tempoLabel: string;
+  moodProfile: string;
+  summary: string;
+  matchedCount: number;
+}
 
 interface PlayerContextValue {
   // Navigation & Global Search
@@ -209,6 +230,10 @@ interface PlayerContextValue {
   setVolume: (vol: number) => void;
   toggleMute: () => void;
   toggleShuffle: () => void;
+  isMoodShuffle: boolean;
+  isMoodShuffleLoading: boolean;
+  moodSessionProfile: MoodSessionProfile | null;
+  toggleMoodShuffle: () => void;
   cycleLoopMode: () => void;
   addToQueue: (track: Track, playNextPosition?: boolean) => void;
   removeFromQueue: (index: number) => void;
@@ -222,9 +247,12 @@ interface PlayerContextValue {
   setSleepTimerEndOfTrack: () => void;
   cancelSleepTimer: () => void;
 
-  // Ambient Video Backdrop
+  // Ambient Video Backdrop & Focus Zone Official MV
   activeEngine: PlaybackEngine;
   ambientVideoId: string | null;
+  isResolvingAmbientVideo: boolean;
+  isFocusMvActive: boolean;
+  setIsFocusMvActive: (active: boolean) => void;
   isAmbientVideoEnabled: boolean;
   setIsAmbientVideoEnabled: (enabled: boolean) => void;
   toggleAmbientVideo: () => void;
@@ -251,6 +279,10 @@ interface PlayerContextValue {
   setIsWhisperComposerOpen: (open: boolean) => void;
   isLyricCardOpen: boolean;
   setIsLyricCardOpen: (open: boolean) => void;
+  isSlipModalOpen: boolean;
+  setIsSlipModalOpen: (open: boolean) => void;
+  isStudioSheetOpen: boolean;
+  setIsStudioSheetOpen: (open: boolean) => void;
   isWeeklyAuraOpen: boolean;
   setIsWeeklyAuraOpen: (open: boolean) => void;
   isTwinModalOpen: boolean;
@@ -316,6 +348,14 @@ function interleaveTracks(lists: Track[][], maxItems = 24): Track[] {
 }
 
 export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const {
+    mode: networkMode,
+    isAppInBackground,
+    notifyTrackPlayStart,
+    notifyPlayerBufferingState,
+    notifyPlayerStallEvent,
+  } = useNetworkMode();
+  const { settings } = useSettings();
   const initialPrefs = useMemo(() => loadPlayerPrefs(), []);
 
   // Views & UI Panels — always launch on Home with Right Panel CLOSED
@@ -356,6 +396,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [volume, setVolumeState] = useState(initialPrefs.volume);
   const [isMuted, setIsMuted] = useState(initialPrefs.isMuted);
   const [isShuffled, setIsShuffled] = useState(false);
+  const [isMoodShuffle, setIsMoodShuffle] = useState(false);
+  const [isMoodShuffleLoading, setIsMoodShuffleLoading] = useState(false);
+  const [moodSessionProfile, setMoodSessionProfile] = useState<MoodSessionProfile | null>(null);
   const [loopMode, setLoopMode] = useState<LoopMode>(initialPrefs.loopMode);
   const [originalQueueIds, setOriginalQueueIds] = useState<string[]>([]);
   const [queueIds, setQueueIds] = useState<string[]>([]);
@@ -385,9 +428,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [activeYtDeck, setActiveYtDeck] = useState<0 | 1>(0);
   const [isWhisperComposerOpen, setIsWhisperComposerOpen] = useState(false);
   const [isLyricCardOpen, setIsLyricCardOpen] = useState(false);
+  const [isSlipModalOpen, setIsSlipModalOpen] = useState(false);
+  const [isStudioSheetOpen, setIsStudioSheetOpen] = useState(false);
   const [isWeeklyAuraOpen, setIsWeeklyAuraOpen] = useState(false);
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
   const [ambientVideoId, setAmbientVideoId] = useState<string | null>(null);
+  const [isResolvingAmbientVideo, setIsResolvingAmbientVideo] = useState<boolean>(false);
+  const [isFocusMvActive, setIsFocusMvActive] = useState<boolean>(false);
   const [listeningHistory, setListeningHistory] = useState<ListeningHistoryEntry[]>(() =>
     loadListeningHistory()
   );
@@ -436,6 +483,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const consecutiveErrorSkipsRef = useRef(0);
   const lyricsAbortRef = useRef<AbortController | null>(null);
   const moodMixSeqRef = useRef(0);
+  const moodShuffleAbortRef = useRef<AbortController | null>(null);
+  const moodAnalysisCacheRef = useRef<
+    Map<string, { profile: MoodSessionProfile; matchedTrackIds: string[] }>
+  >(new Map());
   const isTransitioningRef = useRef(false);
   const transitionLockTimerRef = useRef<number | null>(null);
 
@@ -451,6 +502,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   currentTrackIdRef.current = currentTrackId;
   const isShuffledRef = useRef(isShuffled);
   isShuffledRef.current = isShuffled;
+  const isMoodShuffleRef = useRef(isMoodShuffle);
+  isMoodShuffleRef.current = isMoodShuffle;
+  const networkModeRef = useRef(networkMode);
+  networkModeRef.current = networkMode;
   const loopModeRef = useRef(loopMode);
   loopModeRef.current = loopMode;
   const volumeRef = useRef(volume);
@@ -994,12 +1049,53 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, []);
 
+  // Screen WakeLock for uninterrupted background & lock-screen audio sessions
+  useEffect(() => {
+    if (!settings.backgroundPlaybackEnabled || !isPlaying) return;
+    const nav = navigator as Navigator & {
+      wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> };
+    };
+    if (!nav.wakeLock?.request) return;
+
+    let activeSentinel: { release: () => Promise<void> } | null = null;
+    let disposed = false;
+
+    const acquire = async () => {
+      try {
+        if (document.visibilityState === 'visible' && !disposed) {
+          activeSentinel = await nav.wakeLock!.request('screen');
+        }
+      } catch {
+        // WakeLock may be disallowed on low-battery or non-visible tabs
+      }
+    };
+
+    acquire();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible' && !activeSentinel) {
+        acquire();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      activeSentinel?.release().catch(() => {});
+      activeSentinel = null;
+    };
+  }, [settings.backgroundPlaybackEnabled, isPlaying]);
+
   useEffect(() => {
     const cap = window.Capacitor;
     const islandPlugin = cap?.Plugins?.DynamicIsland;
     if (!cap?.isNativePlatform?.() || !islandPlugin) return;
 
-    if (!currentTrack) {
+    const shouldShowService =
+      Boolean(currentTrack) &&
+      (settings.dynamicIslandEnabled || settings.mediaNotificationsEnabled);
+
+    if (!shouldShowService || !currentTrack) {
       islandPlugin.hide?.().catch(() => {});
       return;
     }
@@ -1010,9 +1106,18 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         artist: currentTrack.artist,
         isPlaying,
         artwork: currentTrack.coverUrl,
+        showOverlay: settings.dynamicIslandEnabled,
       })
       .catch(() => {});
-  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.coverUrl, isPlaying]);
+  }, [
+    currentTrack?.id,
+    currentTrack?.title,
+    currentTrack?.artist,
+    currentTrack?.coverUrl,
+    isPlaying,
+    settings.dynamicIslandEnabled,
+    settings.mediaNotificationsEnabled,
+  ]);
 
   const ambientPalette = useMemo<AmbientPalette>(
     () => (isDynamicThemeSync ? extractedPalette : DEFAULT_AMBIENT_PALETTE),
@@ -1093,28 +1198,85 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => controller.abort();
   }, [currentTrack?.id]);
 
-  // Resolve real moving YouTube Music Video ID for Ambient Video Backdrop
+  // Sync buffering & play state to Adaptive Smart Network detector + adjust YT quality in Lite Mode
   useEffect(() => {
-    if (!currentTrack || currentTrack.sourceType === 'local' || !isAmbientVideoEnabled) {
+    notifyPlayerBufferingState(isBuffering, isPlaying);
+  }, [isBuffering, isPlaying, notifyPlayerBufferingState]);
+
+  useEffect(() => {
+    const suggested = networkMode === 'lite' ? 'small' : 'default';
+    ([0, 1] as const).forEach((deckIdx) => {
+      if (ytReadyRef.current[deckIdx]) {
+        try {
+          ytPlayersRef.current[deckIdx]?.setPlaybackQuality?.(suggested);
+        } catch {
+          // Ignore unsupported YT quality call
+        }
+      }
+    });
+  }, [networkMode]);
+
+  // Resolve real moving YouTube Official Music Video ID (strictly excluding Lyrics/Static/Cover)
+  useEffect(() => {
+    const shouldResolveMv = isAmbientVideoEnabled || (isZenMode && isFocusMvActive);
+    if (
+      !currentTrack ||
+      currentTrack.sourceType === 'local' ||
+      !shouldResolveMv ||
+      networkMode === 'lite' ||
+      isAppInBackground
+    ) {
       setAmbientVideoId(null);
+      setIsResolvingAmbientVideo(false);
       return;
     }
 
-    setAmbientVideoId(currentTrack.videoId || null);
+    const raw = (currentTrack.rawTitle || '').toLowerCase();
+    const isAlreadyVerifiedMv =
+      Boolean(currentTrack.videoId) &&
+      (raw.includes('official music video') ||
+        raw.includes('official mv') ||
+        raw.includes('official video')) &&
+      !/\b(lyrics?|lirik|audio\s*only|official\s*audio|static|cover|karaoke|instrumental|slowed|reverb|lyric\s*video)\b/i.test(
+        raw
+      );
+
+    if (isAlreadyVerifiedMv && currentTrack.videoId) {
+      setAmbientVideoId(currentTrack.videoId);
+      setIsResolvingAmbientVideo(false);
+      return;
+    }
+
+    setAmbientVideoId(null);
+    setIsResolvingAmbientVideo(true);
     const controller = new AbortController();
 
     resolveYouTubeMusicVideoId(currentTrack.artist, currentTrack.title, controller.signal)
       .then((mvId) => {
-        if (!controller.signal.aborted && mvId) {
-          setAmbientVideoId(mvId);
+        if (!controller.signal.aborted) {
+          setAmbientVideoId(mvId || null);
+          setIsResolvingAmbientVideo(false);
         }
       })
       .catch(() => {
-        // Keep fallback videoId if available
+        if (!controller.signal.aborted) {
+          setAmbientVideoId(null);
+          setIsResolvingAmbientVideo(false);
+        }
       });
 
     return () => controller.abort();
-  }, [currentTrack?.id, currentTrack?.videoId, currentTrack?.sourceType, isAmbientVideoEnabled]);
+  }, [
+    currentTrack?.id,
+    currentTrack?.videoId,
+    currentTrack?.rawTitle,
+    currentTrack?.sourceType,
+    isAmbientVideoEnabled,
+    isZenMode,
+    isFocusMvActive,
+    networkMode,
+    isAppInBackground,
+  ]);
 
   // Silent Listening History Tracker (>20s per play stored to nocty_listening_history)
   const flushListeningSession = useCallback(() => {
@@ -1378,6 +1540,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     ) => Promise<void>
   >(async () => {});
 
+  const runMoodShuffleRef = useRef<
+    (anchorTrack: Track, sourceQueueIds: string[], curIdx: number, showToast?: boolean) => Promise<void>
+  >(async () => {});
+
   const startPlaybackForTrack = useCallback(
     async (
       track: Track,
@@ -1388,10 +1554,17 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const reqSeq = ++playRequestSeqRef.current;
       crossfadeTriggeredSeqRef.current = -1;
       fallbackAttemptIndexRef.current = 0;
+      if (!isAutoRecovery) {
+        notifyTrackPlayStart();
+        consecutiveErrorSkipsRef.current = 0;
+      }
       const safeStart = startSeconds > 0 && Number.isFinite(startSeconds) ? startSeconds : 0;
       pendingInitialSeekRef.current = safeStart > 0 ? { seq: reqSeq, seconds: safeStart } : null;
-      if (!isAutoRecovery) {
-        consecutiveErrorSkipsRef.current = 0;
+
+      if (isMoodShuffleRef.current && !isAutoRecovery) {
+        const q = queueIdsRef.current;
+        const idx = getResolvedCurrentIndex(q, track.id);
+        void runMoodShuffleRef.current(track, q, idx, false);
       }
 
       const prevEngine = activeEngineRef.current;
@@ -1623,6 +1796,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       fadeInHtml5Slot,
       fadeOutHtml5Slot,
       fadeOutYtDeck,
+      getResolvedCurrentIndex,
+      notifyTrackPlayStart,
     ]
   );
 
@@ -1813,6 +1988,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             modestbranding: 1,
             rel: 0,
             playsinline: 1,
+            vq: networkModeRef.current === 'lite' ? 'small' : 'medium',
             origin: window.location.origin,
           },
           events: {
@@ -1820,6 +1996,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               if (!mounted) return;
               ytPlayersRef.current[deckIdx] = event.target;
               ytReadyRef.current[deckIdx] = true;
+              if (networkModeRef.current === 'lite') {
+                try {
+                  event.target.setPlaybackQuality?.('small');
+                } catch {
+                  // Ignore
+                }
+              }
 
               const pendingVid = pendingYtVideoIdsRef.current[deckIdx];
               if (
@@ -1848,10 +2031,24 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
               if (event.data === YTState.BUFFERING) {
                 setIsBuffering(true);
+                if (networkModeRef.current === 'lite') {
+                  try {
+                    event.target.setPlaybackQuality?.('small');
+                  } catch {
+                    // Ignore
+                  }
+                }
               } else if (event.data === YTState.PLAYING) {
                 setIsPlaying(true);
                 setIsBuffering(false);
                 consecutiveErrorSkipsRef.current = 0;
+                if (networkModeRef.current === 'lite') {
+                  try {
+                    event.target.setPlaybackQuality?.('small');
+                  } catch {
+                    // Ignore
+                  }
+                }
 
                 const pendingFadeMs = ytFadingInPendingRef.current[deckIdx];
                 if (pendingFadeMs && pendingFadeMs > 0) {
@@ -2143,6 +2340,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const handleWaiting = () => {
         if (!isActiveSlot()) return;
         setIsBuffering(true);
+        notifyPlayerStallEvent();
+      };
+
+      const handleStalled = () => {
+        if (!isActiveSlot()) return;
+        notifyPlayerStallEvent();
       };
 
       const handleCanPlay = () => {
@@ -2180,6 +2383,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       audio.addEventListener('playing', handlePlaying);
       audio.addEventListener('pause', handlePause);
       audio.addEventListener('waiting', handleWaiting);
+      audio.addEventListener('stalled', handleStalled);
       audio.addEventListener('canplay', handleCanPlay);
       audio.addEventListener('ended', handleEnded);
       audio.addEventListener('error', handleError);
@@ -2193,6 +2397,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         audio.removeEventListener('playing', handlePlaying);
         audio.removeEventListener('pause', handlePause);
         audio.removeEventListener('waiting', handleWaiting);
+        audio.removeEventListener('stalled', handleStalled);
         audio.removeEventListener('canplay', handleCanPlay);
         audio.removeEventListener('ended', handleEnded);
         audio.removeEventListener('error', handleError);
@@ -2203,7 +2408,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => {
       cleanups.forEach((fn) => fn());
     };
-  }, [clearHtml5Fade, triggerEndOfTrackCrossfade]);
+  }, [clearHtml5Fade, notifyPlayerStallEvent, triggerEndOfTrackCrossfade]);
 
   // Sync live volume & mute across both decks and pools (scaling any ongoing cross-fade cleanly)
   useEffect(() => {
@@ -2367,6 +2572,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const togglePlayPause = useCallback(() => {
+    triggerHaptic(12);
     if (!currentTrack) {
       const firstId = queueIds[0];
       const first =
@@ -2519,10 +2725,243 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setIsMuted((prev) => !prev);
   }, []);
 
+  const runGeminiMoodShuffleFilter = useCallback(
+    async (
+      anchorTrack: Track,
+      sourceQueueIds: string[],
+      curIdx: number,
+      showToast = false
+    ) => {
+      moodShuffleAbortRef.current?.abort();
+      const controller = new AbortController();
+      moodShuffleAbortRef.current = controller;
+
+      const basePoolIds =
+        originalQueueIdsRef.current.length > 0 ? originalQueueIdsRef.current : sourceQueueIds;
+      const prefix =
+        curIdx >= 0 && curIdx < sourceQueueIds.length
+          ? sourceQueueIds.slice(0, curIdx + 1)
+          : [anchorTrack.id];
+
+      // Build candidate pool from remaining/original queue + curated feeds if small
+      const seenCandidates = new Set<string>([anchorTrack.id]);
+      const candidateTracks: Track[] = [];
+      const addCandidateId = (id: string) => {
+        if (seenCandidates.has(id)) return;
+        const t = trackRegistryRef.current[id];
+        if (!t) return;
+        seenCandidates.add(id);
+        candidateTracks.push(t);
+      };
+
+      const upcomingIds =
+        curIdx >= 0 && curIdx < sourceQueueIds.length ? sourceQueueIds.slice(curIdx + 1) : [];
+      upcomingIds.forEach(addCandidateId);
+      basePoolIds.forEach(addCandidateId);
+      if (candidateTracks.length < 6) {
+        [
+          ...indonesiaTrending,
+          ...featuredTracks,
+          ...viralTracks,
+          ...indieRnbTracks,
+        ].forEach((t) => {
+          if (!seenCandidates.has(t.id)) {
+            seenCandidates.add(t.id);
+            candidateTracks.push(t);
+          }
+        });
+      }
+
+      if (candidateTracks.length === 0) {
+        setMoodSessionProfile(null);
+        return;
+      }
+
+      const limitedCandidates = candidateTracks.slice(0, 35);
+      const cacheKey = `${anchorTrack.id}::${limitedCandidates
+        .map((c) => c.id)
+        .slice(0, 12)
+        .join(',')}`;
+
+      const applyFilteredQueue = (profile: MoodSessionProfile, matchedIds: string[]) => {
+        if (!isMoodShuffleRef.current) return;
+        const prefixSet = new Set(prefix);
+        const dedupedMatches = matchedIds.filter((id) => id !== anchorTrack.id && !prefixSet.has(id));
+        const fallbackMatches = limitedCandidates
+          .map((t) => t.id)
+          .filter((id) => id !== anchorTrack.id && !prefixSet.has(id) && !dedupedMatches.includes(id));
+        const finalUpcoming =
+          dedupedMatches.length > 0 ? dedupedMatches : fallbackMatches;
+
+        const nextQueue = [...prefix, ...finalUpcoming];
+        queueIdsRef.current = nextQueue;
+        setQueueIds(nextQueue);
+        const syncedIdx = nextQueue.indexOf(anchorTrack.id);
+        currentIndexRef.current = syncedIdx;
+        setCurrentIndex(syncedIdx);
+        setMoodSessionProfile({ ...profile, matchedCount: finalUpcoming.length });
+      };
+
+      const cached = moodAnalysisCacheRef.current.get(cacheKey);
+      if (cached) {
+        applyFilteredQueue(cached.profile, cached.matchedTrackIds);
+        if (showToast) {
+          pushToast(
+            `Mood Shuffle: ${cached.profile.moodProfile} (${cached.profile.tempoBpm} BPM)`,
+            'success'
+          );
+        }
+        return;
+      }
+
+      setIsMoodShuffleLoading(true);
+      try {
+        const recentSession = listeningHistoryRef.current
+          .slice(-2)
+          .map((h) => ({ title: h.title, artist: h.artist }));
+
+        const res = await fetch('/api/gemini/mood-shuffle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            currentTrack: {
+              id: anchorTrack.id,
+              title: anchorTrack.title,
+              artist: anchorTrack.artist,
+              album: anchorTrack.album,
+              duration: anchorTrack.duration,
+            },
+            candidateTracks: limitedCandidates.map((t) => ({
+              id: t.id,
+              title: t.title,
+              artist: t.artist,
+              album: t.album,
+              duration: t.duration,
+            })),
+            sessionTracks: recentSession,
+          }),
+        });
+
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(
+            typeof payload?.error === 'string' && payload.error.trim()
+              ? payload.error
+              : `Gemini Mood Shuffle error (HTTP ${res.status})`
+          );
+        }
+
+        if (controller.signal.aborted || !isMoodShuffleRef.current) return;
+
+        const matchedTrackIds: string[] = Array.isArray(payload.matchedTrackIds)
+          ? payload.matchedTrackIds
+          : [];
+        const profile: MoodSessionProfile = {
+          energy: typeof payload.energy === 'string' ? payload.energy : 'medium',
+          tempoBpm: Number.isFinite(payload.tempoBpm) ? payload.tempoBpm : 110,
+          tempoLabel: typeof payload.tempoLabel === 'string' ? payload.tempoLabel : 'Mid-tempo',
+          moodProfile: typeof payload.moodProfile === 'string' ? payload.moodProfile : 'Session Flow',
+          summary:
+            typeof payload.summary === 'string'
+              ? payload.summary
+              : 'Antrean disaring sesuai energi dan tempo sesi saat ini.',
+          matchedCount: matchedTrackIds.length,
+        };
+
+        moodAnalysisCacheRef.current.set(cacheKey, { profile, matchedTrackIds });
+        applyFilteredQueue(profile, matchedTrackIds);
+
+        if (showToast) {
+          pushToast(
+            `Mood Shuffle aktif: ${profile.moodProfile} · ${profile.tempoBpm} BPM`,
+            'success'
+          );
+        }
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError') return;
+        isMoodShuffleRef.current = false;
+        setIsMoodShuffle(false);
+        setMoodSessionProfile(null);
+        const msg =
+          err instanceof Error && err.message
+            ? err.message
+            : 'Gagal mengaktifkan Gemini Mood Shuffle.';
+        pushToast(msg, 'info');
+      } finally {
+        if (moodShuffleAbortRef.current === controller) {
+          setIsMoodShuffleLoading(false);
+        }
+      }
+    },
+    [featuredTracks, indieRnbTracks, indonesiaTrending, pushToast, viralTracks]
+  );
+
+  runMoodShuffleRef.current = runGeminiMoodShuffleFilter;
+
+  const toggleMoodShuffle = useCallback(() => {
+    const next = !isMoodShuffleRef.current;
+
+    if (!next) {
+      moodShuffleAbortRef.current?.abort();
+      isMoodShuffleRef.current = false;
+      setIsMoodShuffle(false);
+      setIsMoodShuffleLoading(false);
+      setMoodSessionProfile(null);
+
+      const base =
+        originalQueueIdsRef.current.length > 0 ? originalQueueIdsRef.current : queueIdsRef.current;
+      const cur = currentTrackIdRef.current;
+      const restored = [...base];
+      queueIdsRef.current = restored;
+      setQueueIds(restored);
+      const nextIdx = cur ? restored.indexOf(cur) : -1;
+      currentIndexRef.current = nextIdx;
+      setCurrentIndex(nextIdx);
+      pushToast('Mood Shuffle dimatikan — antrean penuh dipulihkan', 'info');
+      return;
+    }
+
+    const curId = currentTrackIdRef.current;
+    const anchorTrack =
+      (curId ? trackRegistryRef.current[curId] : null) ||
+      (queueIdsRef.current[0] ? trackRegistryRef.current[queueIdsRef.current[0]] : null) ||
+      indonesiaTrending[0] ||
+      featuredTracks[0] ||
+      null;
+
+    if (!anchorTrack) {
+      pushToast('Putar lagu terlebih dahulu untuk mengaktifkan Mood Shuffle', 'info');
+      return;
+    }
+
+    isShuffledRef.current = false;
+    setIsShuffled(false);
+    isMoodShuffleRef.current = true;
+    setIsMoodShuffle(true);
+
+    const curIdx = getResolvedCurrentIndex(queueIdsRef.current, anchorTrack.id);
+    void runGeminiMoodShuffleFilter(anchorTrack, queueIdsRef.current, curIdx, true);
+  }, [
+    featuredTracks,
+    getResolvedCurrentIndex,
+    indonesiaTrending,
+    pushToast,
+    runGeminiMoodShuffleFilter,
+  ]);
+
   const toggleShuffle = useCallback(() => {
     const next = !isShuffledRef.current;
     isShuffledRef.current = next;
     setIsShuffled(next);
+
+    if (next && isMoodShuffleRef.current) {
+      moodShuffleAbortRef.current?.abort();
+      isMoodShuffleRef.current = false;
+      setIsMoodShuffle(false);
+      setIsMoodShuffleLoading(false);
+      setMoodSessionProfile(null);
+    }
 
     const base =
       originalQueueIdsRef.current.length > 0 ? originalQueueIdsRef.current : queueIdsRef.current;
@@ -2996,6 +3435,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     volume,
     isMuted,
     isShuffled,
+    isMoodShuffle,
+    isMoodShuffleLoading,
+    moodSessionProfile,
     loopMode,
     queueIds,
     queueTracks,
@@ -3012,6 +3454,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setVolume,
     toggleMute,
     toggleShuffle,
+    toggleMoodShuffle,
     cycleLoopMode,
     addToQueue,
     removeFromQueue,
@@ -3024,6 +3467,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     cancelSleepTimer,
     activeEngine,
     ambientVideoId,
+    isResolvingAmbientVideo,
+    isFocusMvActive,
+    setIsFocusMvActive,
     isAmbientVideoEnabled,
     setIsAmbientVideoEnabled,
     toggleAmbientVideo,
@@ -3040,6 +3486,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setIsWhisperComposerOpen,
     isLyricCardOpen,
     setIsLyricCardOpen,
+    isSlipModalOpen,
+    setIsSlipModalOpen,
+    isStudioSheetOpen,
+    setIsStudioSheetOpen,
     isWeeklyAuraOpen,
     setIsWeeklyAuraOpen,
     isTwinModalOpen,
@@ -3058,6 +3508,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const showHomeAmbientVideo =
     !isZenMode &&
     isAmbientVideoEnabled &&
+    networkMode === 'normal' &&
+    !isAppInBackground &&
     Boolean(ambientVideoId) &&
     currentTrack?.sourceType !== 'local';
 

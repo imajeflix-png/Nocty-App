@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ChevronDown,
   Loader2,
   Maximize2,
   Pause,
@@ -8,6 +9,7 @@ import {
   SkipForward,
 } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
+import { useSettings } from '../context/SettingsContext';
 import { formatDuration } from '../utils/audioUtils';
 import { AppleEmoji } from './AppleEmoji';
 import { CoverArt } from './CoverArt';
@@ -29,14 +31,17 @@ export const DynamicIslandPill: React.FC = () => {
     seekTo,
     setIsTwinModalOpen,
   } = usePlayer();
+  const { settings } = useSettings();
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [scrubProgress, setScrubProgress] = useState<number | null>(null);
   const islandRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const isScrubbingRef = useRef(false);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
 
-  // Automatically collapse when fullscreen Now Playing opens or playback resets
+  // Automatically collapse when fullscreen Now Playing opens or active track resets
   useEffect(() => {
     if (isZenMode || !currentTrack) {
       setIsExpanded(false);
@@ -66,11 +71,16 @@ export const DynamicIslandPill: React.FC = () => {
     };
   }, [isExpanded]);
 
-  const shouldRender = Boolean(
-    currentTrack && !isZenMode && (isPlaying || isBuffering || isExpanded)
-  );
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current !== null) {
+        window.clearTimeout(longPressTimerRef.current);
+      }
+    };
+  }, []);
 
-  if (!shouldRender || !currentTrack) {
+  // Always active on both Web & Android APK whenever enabled and a track is loaded outside ZenFocusMode
+  if (!settings.dynamicIslandEnabled || !currentTrack || isZenMode) {
     return null;
   }
 
@@ -81,6 +91,34 @@ export const DynamicIslandPill: React.FC = () => {
   const displayProgress = scrubProgress !== null ? scrubProgress : liveProgress;
   const displayTime =
     scrubProgress !== null && duration > 0 ? scrubProgress * duration : currentTime;
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleCapsulePointerDown = () => {
+    longPressTriggeredRef.current = false;
+    clearLongPressTimer();
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      setIsExpanded(true);
+    }, 420);
+  };
+
+  const handleCapsulePointerEnd = () => {
+    clearLongPressTimer();
+  };
+
+  const handleCapsuleBodyClick = () => {
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false;
+      return;
+    }
+    setIsZenMode(true);
+  };
 
   const computeRatioFromClientX = (clientX: number): number => {
     const el = progressBarRef.current;
@@ -113,7 +151,7 @@ export const DynamicIslandPill: React.FC = () => {
     }
   };
 
-  const useMarquee = currentTrack.title.length > 13;
+  const useMarquee = currentTrack.title.length > 14;
 
   return (
     <>
@@ -121,73 +159,106 @@ export const DynamicIslandPill: React.FC = () => {
         <div
           aria-hidden="true"
           onClick={() => setIsExpanded(false)}
-          className="fixed inset-0 z-30 bg-black/25 backdrop-blur-[1px] transition-opacity duration-300"
+          className="fixed inset-0 bg-black/25 transition-opacity duration-200"
+          style={{ zIndex: 9998 }}
         />
       )}
 
       <div
         ref={islandRef}
-        className="fixed top-3 left-1/2 -translate-x-1/2 z-40 on-artwork select-none"
+        data-dynamic-island="true"
+        style={{
+          position: 'fixed',
+          top: '12px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
+        }}
+        className="on-artwork select-none"
       >
         {!isExpanded ? (
-          <button
-            type="button"
-            onClick={() => setIsExpanded(true)}
-            aria-label={`Dynamic Island: ${currentTrack.title} oleh ${currentTrack.artist}. Ketuk untuk memperluas.`}
-            className="island-spring group flex items-center justify-between gap-2.5 h-9 w-[166px] sm:w-[216px] px-2 rounded-full bg-black/95 border border-white/15 shadow-[0_8px_32px_rgba(0,0,0,0.65)] hover:scale-[1.03] active:scale-[0.97] cursor-pointer overflow-hidden"
+          <div
+            data-dynamic-island="true"
+            style={{
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+            }}
+            className="island-spring group flex items-center justify-between gap-2 h-9 w-[204px] sm:w-[244px] px-1.5 rounded-full bg-[#0B0B0D]/95 border border-white/[0.12] shadow-[0_8px_28px_rgba(0,0,0,0.65)] overflow-hidden"
           >
-            {/* Left: Spinning Circular Album Cover */}
-            <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 ring-1 ring-white/15">
-              <CoverArt
-                src={currentTrack.coverUrl}
-                alt={currentTrack.title}
-                className={`w-full h-full animate-disc-spin ${
-                  isPlaying ? 'disc-running' : 'disc-paused'
-                }`}
-                roundedClass="rounded-full"
-              />
-            </div>
+            {/* Main clickable body: opens ZenFocusMode on single tap, expands on long-press */}
+            <button
+              type="button"
+              onPointerDown={handleCapsulePointerDown}
+              onPointerUp={handleCapsulePointerEnd}
+              onPointerCancel={handleCapsulePointerEnd}
+              onPointerLeave={handleCapsulePointerEnd}
+              onClick={handleCapsuleBodyClick}
+              aria-label={`Buka Now Playing: ${currentTrack.title} oleh ${currentTrack.artist}`}
+              title="Ketuk untuk Now Playing · Tekan tahan untuk kontrol mini"
+              className="flex items-center gap-2 min-w-0 flex-1 h-full text-left cursor-pointer focus-visible:outline-none"
+            >
+              {/* 24x24px mini album cover */}
+              <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 ring-1 ring-white/15">
+                <CoverArt
+                  src={currentTrack.coverUrl}
+                  alt={currentTrack.title}
+                  sizeHint="xs"
+                  className="w-6 h-6"
+                  roundedClass="rounded-full"
+                />
+              </div>
 
-            {/* Center: Smooth Scrolling Title */}
-            <div className="flex-1 min-w-0 overflow-hidden text-left">
-              {useMarquee ? (
-                <div className="animate-island-marquee text-[11px] font-medium text-white whitespace-nowrap">
-                  <span className="pr-6">{currentTrack.title}</span>
-                  <span className="pr-6" aria-hidden="true">
+              {/* Cleanly truncated or smooth marquee title */}
+              <div className="flex-1 min-w-0 overflow-hidden">
+                {useMarquee && isPlaying ? (
+                  <div className="animate-island-marquee text-[11px] font-medium text-white whitespace-nowrap">
+                    <span className="pr-6">{currentTrack.title}</span>
+                    <span className="pr-6" aria-hidden="true">
+                      {currentTrack.title}
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-[11px] font-medium text-white truncate">
                     {currentTrack.title}
-                  </span>
-                </div>
-              ) : (
-                <p className="text-[11px] font-medium text-white truncate text-center">
-                  {currentTrack.title}
-                </p>
-              )}
-            </div>
+                  </p>
+                )}
+              </div>
 
-            {/* Right: 4-Bar Mini Equalizer Matched to Album Cover */}
-            <div className="pr-1 shrink-0 flex items-center">
-              <EqualizerBars
-                active={isPlaying}
-                className="h-3"
-                barColor={eqColor}
-              />
+              {/* Lightweight CSS equalizer when playing */}
+              {isPlaying && (
+                <div className="shrink-0 flex items-center pr-0.5">
+                  <EqualizerBars active={true} className="h-3" barColor={eqColor} />
+                </div>
+              )}
+            </button>
+
+            {/* Quick inline Play/Pause + Expand control trigger */}
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsExpanded(true);
+                }}
+                aria-label="Perluas kontrol Dynamic Island"
+                title="Tampilkan kontrol mini"
+                className="w-6 h-6 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/12 transition-colors"
+              >
+                <ChevronDown className="w-3.5 h-3.5" strokeWidth={2} />
+              </button>
             </div>
-          </button>
+          </div>
         ) : (
           <div
             role="dialog"
             aria-label="Dynamic Island Music Control"
-            className="island-spring relative w-[min(92vw,364px)] rounded-[28px] backdrop-blur-2xl bg-[#141418]/85 border border-white/15 shadow-[0_24px_64px_rgba(0,0,0,0.72)] p-4 text-white overflow-hidden"
+            data-dynamic-island="true"
+            style={{
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+            }}
+            className="island-spring relative w-[min(92vw,364px)] rounded-[28px] bg-[#0B0B0D]/95 border border-white/[0.12] shadow-[0_20px_54px_rgba(0,0,0,0.75)] p-4 text-white overflow-hidden"
           >
-            {/* Subtle Ambient Cover Tint inside Expanded Card */}
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute -top-12 left-1/2 -translate-x-1/2 w-56 h-28 rounded-full blur-3xl opacity-30"
-              style={{
-                background: `radial-gradient(circle, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.9), transparent 70%)`,
-              }}
-            />
-
             <div className="relative z-10 space-y-3.5">
               {/* Top Row: Cover, Title/Artist & Colored Equalizer */}
               <div className="flex items-center gap-3.5">
@@ -203,6 +274,7 @@ export const DynamicIslandPill: React.FC = () => {
                   <CoverArt
                     src={currentTrack.coverUrl}
                     alt={currentTrack.title}
+                    sizeHint="sm"
                     className="w-14 h-14"
                     roundedClass="rounded-2xl"
                   />

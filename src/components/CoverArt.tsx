@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Disc3 } from 'lucide-react';
 import { DEFAULT_COVER_URL } from '../data/moods';
+import { useNetworkMode } from '../context/NetworkModeContext';
+import { resizeCoverUrlForMode } from '../utils/networkTelemetry';
 
 interface CoverArtProps {
   src?: string;
@@ -9,6 +11,7 @@ interface CoverArtProps {
   spinning?: boolean;
   isPlaying?: boolean;
   roundedClass?: string;
+  sizeHint?: 'xs' | 'sm' | 'md' | 'lg';
 }
 
 export const CoverArt: React.FC<CoverArtProps> = ({
@@ -18,15 +21,20 @@ export const CoverArt: React.FC<CoverArtProps> = ({
   spinning = false,
   isPlaying = false,
   roundedClass = 'rounded-xl',
+  sizeHint = 'md',
 }) => {
+  const { mode } = useNetworkMode();
   const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     setHasError(false);
   }, [src]);
 
-  const effectiveSrc = !hasError && src ? src : DEFAULT_COVER_URL;
-  const isYtLetterboxedThumb = effectiveSrc.includes('i.ytimg.com/vi/') && effectiveSrc.includes('hqdefault');
+  const rawSrc = !hasError && src ? src : DEFAULT_COVER_URL;
+  const effectiveSrc = resizeCoverUrlForMode(rawSrc, mode, sizeHint);
+  const isYtLetterboxedThumb =
+    effectiveSrc.includes('i.ytimg.com/vi/') && effectiveSrc.includes('hqdefault');
+  const shouldSpin = spinning && mode === 'normal';
 
   return (
     <div
@@ -34,7 +42,7 @@ export const CoverArt: React.FC<CoverArtProps> = ({
         spinning ? 'rounded-full' : roundedClass
       } ${className}`}
     >
-      {hasError && effectiveSrc === DEFAULT_COVER_URL ? (
+      {hasError && rawSrc === DEFAULT_COVER_URL ? (
         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-white/[0.08] via-white/[0.04] to-transparent">
           <Disc3 className="w-1/2 h-1/2 text-white/45" strokeWidth={1.5} />
         </div>
@@ -42,12 +50,14 @@ export const CoverArt: React.FC<CoverArtProps> = ({
         <img
           src={effectiveSrc}
           alt={alt}
+          loading="lazy"
+          decoding="async"
           referrerPolicy="no-referrer"
           onError={() => setHasError(true)}
           className={`w-full h-full aspect-square object-cover ${
             isYtLetterboxedThumb ? 'scale-[1.36]' : ''
           } ${
-            spinning ? `animate-disc-spin ${isPlaying ? 'disc-running' : 'disc-paused'}` : ''
+            shouldSpin ? `animate-disc-spin ${isPlaying ? 'disc-running' : 'disc-paused'}` : ''
           }`}
         />
       )}

@@ -14,6 +14,7 @@ import {
   Shuffle,
   SkipBack,
   SkipForward,
+  Sparkles,
   Volume2,
   VolumeX,
   X,
@@ -46,6 +47,9 @@ export const FloatingPlayerDock: React.FC = () => {
     volume,
     isMuted,
     isShuffled,
+    isMoodShuffle,
+    isMoodShuffleLoading,
+    moodSessionProfile,
     loopMode,
     rightPanelTab,
     ambientPalette,
@@ -62,6 +66,7 @@ export const FloatingPlayerDock: React.FC = () => {
     setVolume,
     toggleMute,
     toggleShuffle,
+    toggleMoodShuffle,
     cycleLoopMode,
     toggleLike,
     isLiked,
@@ -99,19 +104,24 @@ export const FloatingPlayerDock: React.FC = () => {
 
   return (
     <>
-      {/* Mobile Floating Glass Mini-Player directly above Mobile Bottom Nav (< lg) */}
-      <div className="lg:hidden fixed bottom-[60px] left-2.5 right-2.5 z-30">
-        <div className="relative overflow-hidden rounded-2xl bg-white/[0.08] backdrop-blur-2xl border border-white/[0.10] shadow-[0_12px_36px_rgba(0,0,0,0.65)]">
+      {/* Mobile Floating Glass Mini-Player cleanly floating above Floating Bubble Nav (< lg) */}
+      <div className="lg:hidden fixed bottom-[92px] left-3 right-3 z-30">
+        <div className="relative overflow-hidden rounded-3xl bg-white/[0.09] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.22] shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),0_16px_38px_rgba(0,0,0,0.48)]">
+          {/* Specular top glass edge highlight */}
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent z-20"
+          />
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 blur-2xl transition-all duration-1000"
+            className="ambient-aura-layer pointer-events-none absolute inset-0 blur-2xl transition-all duration-1000"
             style={{
-              opacity: Math.min(0.5, gradientIntensity * 0.85),
+              opacity: Math.min(0.45, gradientIntensity * 0.8),
               background: `linear-gradient(110deg, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.8), rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.7))`,
             }}
           />
 
-          <div className="relative z-10 flex items-center justify-between gap-3 px-3 py-2">
+          <div className="relative z-10 flex items-center justify-between gap-2 px-3 py-2">
             <button
               type="button"
               onClick={() => setIsZenMode(true)}
@@ -138,19 +148,34 @@ export const FloatingPlayerDock: React.FC = () => {
               </div>
             </button>
 
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-0.5 shrink-0">
               {currentTrack && (
                 <button
                   type="button"
                   onClick={() => toggleLike(currentTrack)}
                   aria-label={liked ? 'Hapus dari disukai' : 'Sukai lagu'}
-                  className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
                     liked ? 'text-white' : 'text-white/55 hover:text-white'
                   }`}
                 >
                   <Heart className={`w-4 h-4 ${liked ? 'fill-white' : ''}`} strokeWidth={1.85} />
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={() => toggleRightPanelTab('queue')}
+                aria-label="Antrean Pemutaran"
+                aria-pressed={rightPanelTab === 'queue'}
+                title="Antrean"
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                  rightPanelTab === 'queue'
+                    ? 'bg-white text-[#0B0B0D]'
+                    : 'text-white/65 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <ListOrdered className="w-4 h-4" strokeWidth={1.9} />
+              </button>
 
               <button
                 type="button"
@@ -165,10 +190,10 @@ export const FloatingPlayerDock: React.FC = () => {
                       ? 'Sleep Timer: Akhir lagu'
                       : 'Sleep Timer'
                 }
-                className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
                   isSleepActive
                     ? 'bg-white text-[#0B0B0D]'
-                    : 'text-white/60 hover:text-white hover:bg-white/10'
+                    : 'text-white/65 hover:text-white hover:bg-white/10'
                 }`}
               >
                 <Clock className="w-4 h-4" strokeWidth={1.9} />
@@ -178,7 +203,7 @@ export const FloatingPlayerDock: React.FC = () => {
                 type="button"
                 onClick={togglePlayPause}
                 aria-label={isPlaying ? 'Jeda' : 'Putar'}
-                className="w-9 h-9 rounded-full bg-white text-[#0B0B0D] flex items-center justify-center active:scale-95 transition-transform shadow-md"
+                className="ml-0.5 w-9 h-9 rounded-full bg-white text-[#0B0B0D] flex items-center justify-center active:scale-95 transition-transform shadow-md"
               >
                 {isBuffering ? (
                   <Loader2 className="w-4 h-4 animate-spin" strokeWidth={2.3} />
@@ -204,13 +229,17 @@ export const FloatingPlayerDock: React.FC = () => {
         </div>
       </div>
 
-      {/* Desktop Floating Apple Glassmorphism Player Bar */}
+      {/* Desktop Floating Apple iOS 26 Liquid Glass Player Bar */}
       <footer className="hidden lg:block px-3 pb-3 select-none">
-        <div className="relative h-[82px] w-full rounded-2xl bg-white/[0.06] backdrop-blur-2xl border border-white/[0.09] shadow-[0_18px_50px_rgba(0,0,0,0.65)] px-5 flex items-center justify-between gap-4 overflow-hidden">
+        <div className="relative h-[82px] w-full rounded-3xl bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_16px_44px_rgba(0,0,0,0.5)] px-5 flex items-center justify-between gap-4 overflow-hidden">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent z-20"
+          />
           {/* Soft Dual-Color Ambient Aura behind Floating Glass Dock */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 blur-3xl transition-all duration-1000"
+            className="ambient-aura-layer pointer-events-none absolute inset-0 blur-3xl transition-all duration-1000"
             style={{
               opacity: Math.min(0.52, gradientIntensity * 0.85),
               background: `
@@ -268,7 +297,30 @@ export const FloatingPlayerDock: React.FC = () => {
 
           {/* Center (40%): Clean Transport Controls + Seek Bar */}
           <div className="relative z-10 flex flex-col items-center justify-center w-[40%] max-w-[600px]">
-            <div className="flex items-center gap-3.5 mb-1.5">
+            <div className="flex items-center gap-2.5 mb-1.5">
+              <button
+                type="button"
+                onClick={toggleMoodShuffle}
+                aria-label="Mood Shuffle (Gemini AI)"
+                aria-pressed={isMoodShuffle}
+                title={
+                  isMoodShuffle && moodSessionProfile
+                    ? `Mood Shuffle: ${moodSessionProfile.moodProfile} (${moodSessionProfile.tempoBpm} BPM)`
+                    : 'Mood Shuffle (filter lagu sesuai energi & tempo via Gemini)'
+                }
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                  isMoodShuffle
+                    ? 'bg-white text-[#0B0B0D] shadow-sm'
+                    : 'text-white/55 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                {isMoodShuffleLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" strokeWidth={1.9} />
+                )}
+              </button>
+
               <button
                 type="button"
                 onClick={toggleShuffle}
@@ -496,12 +548,12 @@ export const FloatingPlayerDock: React.FC = () => {
             aria-modal="true"
             aria-label="Pengaturan Sleep Timer"
             onClick={(e) => e.stopPropagation()}
-            className="fixed inset-x-3 bottom-[126px] mx-auto max-w-[360px] lg:inset-x-auto lg:bottom-[100px] lg:right-4 lg:w-[320px] rounded-2xl bg-[#121216]/95 backdrop-blur-2xl border border-white/[0.11] shadow-[0_24px_64px_rgba(0,0,0,0.8)] p-4 overflow-hidden"
+            className="fixed inset-x-3 bottom-[156px] mx-auto max-w-[360px] lg:inset-x-auto lg:bottom-[100px] lg:right-4 lg:w-[320px] rounded-3xl bg-[#121216]/75 backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.20] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_20px_50px_rgba(0,0,0,0.65)] p-4 overflow-hidden"
           >
             {/* Subtle cover-adaptive ambient tint */}
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute -top-12 -right-10 w-44 h-44 rounded-full blur-3xl opacity-25"
+              className="ambient-aura-layer pointer-events-none absolute -top-12 -right-10 w-44 h-44 rounded-full blur-3xl opacity-25"
               style={{
                 background: `radial-gradient(circle, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.9), rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.5), transparent 70%)`,
               }}

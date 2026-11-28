@@ -130,7 +130,7 @@ export const WeeklyAuraModal: React.FC = () => {
       </div>
 
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between gap-3 px-4 sm:px-10 py-4 sm:py-5 shrink-0 border-b border-white/[0.06] bg-white/[0.02] backdrop-blur-xl">
+      <header className="relative z-10 flex items-center justify-between gap-3 px-4 sm:px-10 py-4 sm:py-5 shrink-0 border-b border-white/[0.06] bg-white/[0.02] backdrop-blur-md">
         <div className="flex items-center gap-2.5 min-w-0">
           <span className="w-8 h-8 rounded-full bg-white/10 border border-white/[0.12] flex items-center justify-center shrink-0">
             <AppleEmoji unified="2728" size={16} />
@@ -159,7 +159,7 @@ export const WeeklyAuraModal: React.FC = () => {
       <div className="relative z-10 flex-1 min-h-0 overflow-y-auto px-4 sm:px-8 py-6 sm:py-8">
         <div className="max-w-3xl mx-auto">
           {!report.hasEnoughData ? (
-            <div className="rounded-3xl bg-white/[0.06] backdrop-blur-2xl border border-white/[0.12] p-6 sm:p-10 text-center space-y-5 shadow-2xl">
+            <div className="rounded-3xl bg-white/[0.06] backdrop-blur-md border border-white/[0.12] p-6 sm:p-10 text-center space-y-5 shadow-2xl">
               <div className="w-14 h-14 mx-auto rounded-2xl bg-white/10 border border-white/[0.12] flex items-center justify-center">
                 <Music2 className="w-7 h-7 text-white/85" strokeWidth={1.7} />
               </div>
@@ -198,10 +198,10 @@ export const WeeklyAuraModal: React.FC = () => {
           ) : (
             <div className="space-y-5 pb-10">
               {/* Main Aura Title & Narrative Card */}
-              <section className="relative overflow-hidden rounded-3xl bg-white/[0.06] backdrop-blur-2xl border border-white/[0.12] p-6 sm:p-8 shadow-2xl">
+              <section className="relative overflow-hidden rounded-3xl bg-white/[0.06] backdrop-blur-md border border-white/[0.12] p-6 sm:p-8 shadow-2xl">
                 <div
                   aria-hidden="true"
-                  className="pointer-events-none absolute -top-20 -right-16 w-72 h-72 rounded-full blur-3xl opacity-30"
+                  className="ambient-aura-layer pointer-events-none absolute -top-20 -right-16 w-72 h-72 rounded-full blur-3xl opacity-30"
                   style={{
                     background: `radial-gradient(circle, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.9), transparent 70%)`,
                   }}
@@ -231,7 +231,7 @@ export const WeeklyAuraModal: React.FC = () => {
 
               {/* Listening Time & Persona Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="rounded-2xl bg-white/[0.05] backdrop-blur-2xl border border-white/[0.10] p-5 space-y-2">
+                <div className="rounded-2xl bg-white/[0.05] backdrop-blur-md border border-white/[0.10] p-5 space-y-2">
                   <div className="flex items-center gap-2 text-xs font-medium text-white/60">
                     <Clock className="w-3.5 h-3.5" strokeWidth={1.85} />
                     <span>Total Waktu Dengar (7 Hari)</span>
@@ -244,7 +244,7 @@ export const WeeklyAuraModal: React.FC = () => {
                   </p>
                 </div>
 
-                <div className="rounded-2xl bg-white/[0.05] backdrop-blur-2xl border border-white/[0.10] p-5 space-y-2">
+                <div className="rounded-2xl bg-white/[0.05] backdrop-blur-md border border-white/[0.10] p-5 space-y-2">
                   <div className="flex items-center gap-2 text-xs font-medium text-white/60">
                     <Sparkles className="w-3.5 h-3.5" strokeWidth={1.85} />
                     <span>Pola Jam Aktif (Listening Persona)</span>
@@ -261,7 +261,7 @@ export const WeeklyAuraModal: React.FC = () => {
               </div>
 
               {/* Top 3 Lagu & Artis Minggu Ini */}
-              <section className="rounded-3xl bg-white/[0.05] backdrop-blur-2xl border border-white/[0.10] p-5 sm:p-6 space-y-4">
+              <section className="rounded-3xl bg-white/[0.05] backdrop-blur-md border border-white/[0.10] p-5 sm:p-6 space-y-4">
                 <div className="flex items-center justify-between gap-2">
                   <h2 className="font-display text-base sm:text-lg font-semibold text-white">
                     Top 3 Lagu Minggu Ini

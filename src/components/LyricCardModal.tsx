@@ -190,7 +190,7 @@ export const LyricCardModal: React.FC = () => {
         aria-hidden="true"
       />
 
-      <div className="relative z-10 w-full max-w-3xl max-h-[92vh] flex flex-col rounded-2xl bg-[#121216]/90 backdrop-blur-2xl border border-white/[0.12] shadow-2xl overflow-hidden">
+      <div className="relative z-10 w-full max-w-3xl max-h-[92vh] flex flex-col rounded-2xl bg-[#121216]/90 backdrop-blur-md border border-white/[0.12] shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-white/[0.08] shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">

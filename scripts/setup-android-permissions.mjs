@@ -10,6 +10,9 @@ const REQUIRED_PERMISSIONS = [
   'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
   'android.permission.POST_NOTIFICATIONS',
   'android.permission.SYSTEM_ALERT_WINDOW',
+  'android.permission.VIBRATE',
+  'android.permission.CAMERA',
+  'android.permission.READ_MEDIA_IMAGES',
   'android.permission.BLUETOOTH',
   'android.permission.BLUETOOTH_CONNECT',
 ];
@@ -29,17 +32,26 @@ if (!fs.existsSync(manifestPath)) {
 
 let xml = fs.readFileSync(manifestPath, 'utf8');
 const missing = REQUIRED_PERMISSIONS.filter((perm) => !xml.includes(`"${perm}"`));
+const needsLegacyStorage = !xml.includes('"android.permission.READ_EXTERNAL_STORAGE"');
+const needsCameraFeature = !xml.includes('"android.hardware.camera"');
 
-if (missing.length > 0) {
-  const permissionLines = missing
-    .map((perm) => `    <uses-permission android:name="${perm}" />`)
-    .join('\n');
+if (missing.length > 0 || needsLegacyStorage || needsCameraFeature) {
+  const lines = missing.map((perm) => `    <uses-permission android:name="${perm}" />`);
+  if (needsLegacyStorage) {
+    lines.push(
+      '    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />'
+    );
+  }
+  if (needsCameraFeature) {
+    lines.push('    <uses-feature android:name="android.hardware.camera" android:required="false" />');
+  }
+  const permissionLines = lines.join('\n');
 
   const appOpenIndex = xml.indexOf('<application');
   if (appOpenIndex !== -1) {
     xml =
       xml.slice(0, appOpenIndex) +
-      `<!-- Nocty Background Audio, Dynamic Island Overlay & Lockscreen Controls Permissions -->\n` +
+      `<!-- Nocty Background Audio, Dynamic Island Overlay, Haptics, Camera & Storage Permissions -->\n` +
       `${permissionLines}\n\n    ` +
       xml.slice(appOpenIndex);
   } else {

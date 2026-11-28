@@ -2,14 +2,26 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    },
+  },
+});
 
 interface CatalogTrack {
   id: string;
   videoId?: string;
   title: string;
+  rawTitle?: string;
+  channelName?: string;
   artist: string;
   album: string;
   duration: number;
@@ -265,7 +277,33 @@ function extractVideoRenderers(payload: unknown): InnerTubeVideoRenderer[] {
   return results;
 }
 
-async function queryYouTubeInnerTube(query: string, limit: number): Promise<CatalogTrack[]> {
+const DISALLOWED_MV_REGEX =
+  /\b(lyrics?|lirik|audio\s*only|official\s*audio|static|cover|karaoke|instrumental|slowed|reverb|nightcore|lyric\s*video|8d\s*audio|sped\s*up)\b/i;
+
+function scoreOfficialMusicVideo(rawTitle: string, channelOwner: string): number {
+  const t = rawTitle.toLowerCase();
+  const c = channelOwner.toLowerCase();
+  if (DISALLOWED_MV_REGEX.test(rawTitle)) return -100;
+
+  let score = 0;
+  if (t.includes('official music video')) score += 16;
+  if (t.includes('official mv')) score += 15;
+  if (t.includes('official video')) score += 12;
+  if (t.includes('music video') || /\bmv\b/.test(t)) score += 9;
+  if (t.includes('visualizer')) score -= 2;
+  if (t.includes('live') || t.includes('acoustic')) score -= 6;
+  if (c.includes('vevo') || c.includes('official') || c.includes('records') || c.includes('music')) {
+    score += 5;
+  }
+  if (c.includes(' - topic')) score -= 12;
+  return score;
+}
+
+async function queryYouTubeInnerTube(
+  query: string,
+  limit: number,
+  mode: 'audio' | 'mv' = 'audio'
+): Promise<CatalogTrack[]> {
   const response = await fetch('https://www.youtube.com/youtubei/v1/search?prettyPrint=false', {
     method: 'POST',
     headers: {
@@ -308,24 +346,39 @@ async function queryYouTubeInnerTube(query: string, limit: number): Promise<Cata
       continue;
     }
 
+    if (mode === 'mv' && DISALLOWED_MV_REGEX.test(rawTitle)) {
+      continue;
+    }
+
     const duration = parseLengthSeconds(vr.lengthText?.simpleText);
     if (duration < 45 || (!wantsLong && duration > 720)) continue;
 
     const rawOwner =
       vr.ownerText?.runs?.[0]?.text || vr.longBylineText?.runs?.[0]?.text || '';
+
+    if (mode === 'mv' && /\s-\s*Topic$/i.test(rawOwner)) {
+      // YouTube Topic channels are static album-art audio tracks, not moving Music Videos
+      continue;
+    }
+
     const { title, artist } = cleanMusicTitleAndArtist(rawTitle, rawOwner);
-    const dedupKey = normalizeDedupKey(title, artist);
+    const dedupKey = mode === 'mv' ? videoId : normalizeDedupKey(title, artist);
     if (seenKeys.has(dedupKey)) continue;
 
     seenIds.add(videoId);
     seenKeys.add(dedupKey);
 
     candidates.push({
-      score: scoreEmbedFriendly(rawTitle, rawOwner),
+      score:
+        mode === 'mv'
+          ? scoreOfficialMusicVideo(rawTitle, rawOwner)
+          : scoreEmbedFriendly(rawTitle, rawOwner),
       track: {
         id: `yt-${videoId}`,
         videoId,
         title,
+        rawTitle: decodeText(rawTitle),
+        channelName: decodeText(rawOwner),
         artist,
         album: 'YouTube Music',
         duration,
@@ -727,6 +780,140 @@ async function startServer() {
     }
   });
 
+  // Gemini AI Mood Shuffle Endpoint: Analyzes current track audio features & filters queue by energy and tempo
+  app.post('/api/gemini/mood-shuffle', async (req, res) => {
+    const { currentTrack, candidateTracks, sessionTracks } = req.body || {};
+    if (!currentTrack || !Array.isArray(candidateTracks) || candidateTracks.length === 0) {
+      res.status(400).json({
+        error: 'currentTrack and candidateTracks are required',
+      });
+      return;
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      res.status(503).json({
+        error: 'GEMINI_API_KEY belum diatur. Periksa panel Settings > Secrets.',
+      });
+      return;
+    }
+
+    const candidatesSlice = candidateTracks.slice(0, 40).map((t: any) => ({
+      id: String(t.id),
+      title: String(t.title || ''),
+      artist: String(t.artist || ''),
+      album: String(t.album || ''),
+      duration: Number(t.duration || 210),
+    }));
+    const validIds = new Set(candidatesSlice.map((t: { id: string }) => t.id));
+
+    const recentSessionSummary = Array.isArray(sessionTracks) && sessionTracks.length > 0
+      ? sessionTracks
+          .slice(0, 3)
+          .map((t: any) => `"${t.title}" - ${t.artist}`)
+          .join(', ')
+      : 'None';
+
+    try {
+      const prompt = `Analyze the current track's audio features from its metadata and current listening session:
+Current Track: "${currentTrack.title}" by "${currentTrack.artist}" (album: "${currentTrack.album || 'Unknown'}", duration: ${currentTrack.duration || 210}s)
+Recent Session Context: ${recentSessionSummary}
+
+1. Estimate the current track's energy level ("low", "medium", or "high"), tempo in BPM (integer), tempo feel ("Slow", "Mid-tempo", or "Upbeat"), and a concise 2-word mood profile (e.g. "Late Night", "Indie Chill", "Upbeat Pop").
+2. Evaluate each candidate track below and filter which ones genuinely match the energy and tempo of this current listening session ("matchedTrackIds", ordered from best match to least, keeping at least the top 3 closest matches if the pool is small).
+3. Also provide "orderedTrackIds" ranking all candidates by closeness in energy and tempo.
+4. Provide a short 1-sentence Indonesian summary explaining the session's vibe and tempo match.
+
+Candidate tracks:
+${JSON.stringify(candidatesSlice)}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              energy: {
+                type: Type.STRING,
+                description: 'Estimated energy level: low, medium, or high.',
+              },
+              tempoBpm: {
+                type: Type.INTEGER,
+                description: 'Estimated tempo in beats per minute (BPM).',
+              },
+              tempoLabel: {
+                type: Type.STRING,
+                description: 'Tempo feel label: Slow, Mid-tempo, or Upbeat.',
+              },
+              moodProfile: {
+                type: Type.STRING,
+                description: 'Concise 2-word mood profile for the current session.',
+              },
+              summary: {
+                type: Type.STRING,
+                description: 'Short 1-sentence Indonesian summary of the analyzed energy and tempo.',
+              },
+              matchedTrackIds: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: 'Candidate track IDs that match the session energy and tempo, best match first.',
+              },
+              orderedTrackIds: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: 'All candidate track IDs ordered by energy and tempo similarity.',
+              },
+            },
+            required: [
+              'energy',
+              'tempoBpm',
+              'tempoLabel',
+              'moodProfile',
+              'summary',
+              'matchedTrackIds',
+              'orderedTrackIds',
+            ],
+          },
+        },
+      });
+
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      const matchedTrackIds: string[] = Array.isArray(parsed.matchedTrackIds)
+        ? Array.from(new Set(parsed.matchedTrackIds.filter((id: unknown): id is string => typeof id === 'string' && validIds.has(id))))
+        : [];
+      const orderedTrackIds: string[] = Array.isArray(parsed.orderedTrackIds)
+        ? Array.from(new Set(parsed.orderedTrackIds.filter((id: unknown): id is string => typeof id === 'string' && validIds.has(id))))
+        : [];
+
+      // Append any valid candidate IDs omitted by the model to orderedTrackIds
+      for (const c of candidatesSlice) {
+        if (!orderedTrackIds.includes(c.id)) {
+          orderedTrackIds.push(c.id);
+        }
+      }
+
+      res.json({
+        energy: typeof parsed.energy === 'string' ? parsed.energy : 'medium',
+        tempoBpm: Number.isFinite(parsed.tempoBpm) ? Math.max(50, Math.min(200, Math.round(parsed.tempoBpm))) : 110,
+        tempoLabel: typeof parsed.tempoLabel === 'string' ? parsed.tempoLabel : 'Mid-tempo',
+        moodProfile: typeof parsed.moodProfile === 'string' ? parsed.moodProfile : 'Session Flow',
+        summary: typeof parsed.summary === 'string' ? parsed.summary : 'Antrean disesuaikan dengan energi dan tempo sesi saat ini.',
+        matchedTrackIds: matchedTrackIds.length > 0 ? matchedTrackIds : orderedTrackIds,
+        orderedTrackIds,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal menganalisis mood via Gemini API';
+      const status = /403|PERMISSION_DENIED|API_KEY_INVALID/i.test(msg)
+        ? 403
+        : /429|RESOURCE_EXHAUSTED/i.test(msg)
+          ? 429
+          : 502;
+      res.status(status).json({ error: msg });
+    }
+  });
+
   // Live Official Top Charts: Top Hits Indonesia (ID RSS), Global Top 50 (US RSS), Viral & Indie
   app.get('/api/curated', async (_req, res) => {
     try {
@@ -764,16 +951,19 @@ async function startServer() {
 
     const rawLimit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 16;
     const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(40, rawLimit)) : 16;
+    const mode = req.query.mode === 'mv' ? 'mv' : 'audio';
 
-    const hasAudioHint = /\b(audio|lyrics?|lirik|song|lagu|remix|cover|live|acoustic|akustik|lofi|beats)\b/i.test(
-      rawQ
-    );
-    const effectiveQuery = hasAudioHint ? rawQ : `${rawQ} official audio`;
+    const hasMediaHint =
+      mode === 'mv' ||
+      /\b(audio|lyrics?|lirik|song|lagu|remix|cover|live|acoustic|akustik|lofi|beats|music\s*video|official\s*video|official\s*mv|\bmv\b)\b/i.test(
+        rawQ
+      );
+    const effectiveQuery = hasMediaHint ? rawQ : `${rawQ} official audio`;
 
     try {
-      let tracks = await queryYouTubeInnerTube(effectiveQuery, limit);
-      if (tracks.length < 3 && effectiveQuery !== rawQ) {
-        const fallbackTracks = await queryYouTubeInnerTube(rawQ, limit);
+      let tracks = await queryYouTubeInnerTube(effectiveQuery, limit, mode);
+      if (mode !== 'mv' && tracks.length < 3 && effectiveQuery !== rawQ) {
+        const fallbackTracks = await queryYouTubeInnerTube(rawQ, limit, mode);
         const existingIds = new Set(tracks.map((t) => t.videoId));
         for (const ft of fallbackTracks) {
           if (!existingIds.has(ft.videoId)) {

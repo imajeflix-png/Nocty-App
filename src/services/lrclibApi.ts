@@ -1,7 +1,10 @@
 import { LyricLine } from '../types/music';
 import { cleanTrackMetaForLyrics, parseLrcLyrics } from '../utils/audioUtils';
+import { reportApiTiming } from '../utils/networkTelemetry';
 
 const LYRICS_CACHE_KEY = 'nocty_lyrics_cache_v1';
+const LYRICS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const LRCLIB_TIMEOUT_MS = 5000;
 
 interface CachedLyricEntry {
   synced: LyricLine[];
@@ -18,12 +21,24 @@ interface LrcLibResponse {
 
 const memoryCache = new Map<string, CachedLyricEntry>();
 
+function isFreshEntry(entry: CachedLyricEntry | undefined, now = Date.now()): boolean {
+  return Boolean(entry && typeof entry.cachedAt === 'number' && now - entry.cachedAt < LYRICS_CACHE_TTL_MS);
+}
+
 function readLocalCache(): Record<string, CachedLyricEntry> {
   try {
     const raw = localStorage.getItem(LYRICS_CACHE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    if (!parsed || typeof parsed !== 'object') return {};
+    const now = Date.now();
+    const fresh: Record<string, CachedLyricEntry> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (isFreshEntry(v as CachedLyricEntry, now)) {
+        fresh[k] = v as CachedLyricEntry;
+      }
+    }
+    return fresh;
   } catch {
     return {};
   }
@@ -48,6 +63,39 @@ function writeLocalCache(key: string, entry: CachedLyricEntry): void {
   }
 }
 
+async function fetchLrcWithTimeout(url: string, externalSignal?: AbortSignal): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const startedAt = Date.now();
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, LRCLIB_TIMEOUT_MS);
+
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      window.clearTimeout(timer);
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
+
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    reportApiTiming(Date.now() - startedAt, false);
+    return res;
+  } catch (err) {
+    if (timedOut && !externalSignal?.aborted) {
+      reportApiTiming(Date.now() - startedAt, true);
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
+  }
+}
+
 async function queryLrcLibGet(
   artist: string,
   title: string,
@@ -56,14 +104,14 @@ async function queryLrcLibGet(
 ): Promise<LrcLibResponse | null> {
   const durParam = duration && duration > 0 ? `&duration=${Math.round(duration)}` : '';
   const url = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(title)}${durParam}`;
-  const res = await fetch(url, { signal });
+  const res = await fetchLrcWithTimeout(url, signal);
   if (!res.ok) return null;
   return (await res.json()) as LrcLibResponse;
 }
 
 async function queryLrcLibSearch(query: string, signal?: AbortSignal): Promise<LrcLibResponse | null> {
   const url = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
-  const res = await fetch(url, { signal });
+  const res = await fetchLrcWithTimeout(url, signal);
   if (!res.ok) return null;
   const list = (await res.json()) as LrcLibResponse[];
   if (!Array.isArray(list) || list.length === 0) return null;
@@ -80,12 +128,12 @@ export async function fetchSyncedLyrics(
   const cacheKey = `${cleaned.artist.toLowerCase()}::${cleaned.title.toLowerCase()}`;
 
   const memHit = memoryCache.get(cacheKey);
-  if (memHit) {
-    return { synced: memHit.synced, plain: memHit.plain };
+  if (isFreshEntry(memHit)) {
+    return { synced: memHit!.synced, plain: memHit!.plain };
   }
 
   const diskCache = readLocalCache();
-  if (diskCache[cacheKey]) {
+  if (isFreshEntry(diskCache[cacheKey])) {
     memoryCache.set(cacheKey, diskCache[cacheKey]);
     return { synced: diskCache[cacheKey].synced, plain: diskCache[cacheKey].plain };
   }
@@ -113,7 +161,7 @@ export async function fetchSyncedLyrics(
       if (titleOnlyHit) match = titleOnlyHit;
     }
   } catch (err) {
-    if ((err as Error)?.name === 'AbortError') {
+    if ((err as Error)?.name === 'AbortError' && signal?.aborted) {
       throw err;
     }
   }

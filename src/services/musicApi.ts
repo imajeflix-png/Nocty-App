@@ -1,10 +1,42 @@
 import { Track } from '../types/music';
 import { DEFAULT_COVER_URL } from '../data/moods';
+import {
+  getCurrentNetworkMode,
+  reportApiTiming,
+  resizeCoverUrlForMode,
+} from '../utils/networkTelemetry';
+
+const CACHE_TTL_24H_MS = 24 * 60 * 60 * 1000;
+const SEARCH_CACHE_KEY = 'nocty_search_cache_v1';
+const CURATED_CACHE_KEY = 'nocty_curated_cache_v1';
+const STREAM_CACHE_KEY = 'nocty_stream_cache_v1';
+const MAX_API_TIMEOUT_MS = 5000;
+
+interface CachedSearchEntry {
+  tracks: Track[];
+  cachedAt: number;
+}
+
+interface CachedCuratedEntry {
+  indonesia: Track[];
+  global: Track[];
+  viral: Track[];
+  indieRnb: Track[];
+  cachedAt: number;
+}
+
+interface CachedStreamEntry {
+  videoId: string;
+  duration?: number;
+  cachedAt: number;
+}
 
 interface ApiTrackPayload {
   id: string;
   videoId?: string;
   title: string;
+  rawTitle?: string;
+  channelName?: string;
   artist: string;
   album?: string;
   duration: number;
@@ -53,6 +85,128 @@ export interface ResolvedFullStream {
 
 const resolvedVideoIdCache = new Map<string, { videoId: string; duration?: number }>();
 const resolvedMusicVideoIdCache = new Map<string, string>();
+
+function readStreamCache(): Record<string, CachedStreamEntry> {
+  try {
+    const raw = localStorage.getItem(STREAM_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const now = Date.now();
+    const fresh: Record<string, CachedStreamEntry> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      const entry = v as CachedStreamEntry;
+      if (entry?.videoId && typeof entry.cachedAt === 'number' && now - entry.cachedAt < CACHE_TTL_24H_MS) {
+        fresh[k] = entry;
+      }
+    }
+    return fresh;
+  } catch {
+    return {};
+  }
+}
+
+function getCachedStream(cacheKey: string): { videoId: string; duration?: number } | null {
+  const mem = resolvedVideoIdCache.get(cacheKey);
+  if (mem?.videoId) return mem;
+  const disk = readStreamCache();
+  const hit = disk[cacheKey];
+  if (hit?.videoId) {
+    const val = { videoId: hit.videoId, duration: hit.duration };
+    resolvedVideoIdCache.set(cacheKey, val);
+    return val;
+  }
+  return null;
+}
+
+function saveCachedStream(cacheKey: string, videoId: string, duration?: number): void {
+  resolvedVideoIdCache.set(cacheKey, { videoId, duration });
+  try {
+    const disk = readStreamCache();
+    disk[cacheKey] = { videoId, duration, cachedAt: Date.now() };
+    const keys = Object.keys(disk);
+    if (keys.length > 80) {
+      keys
+        .sort((a, b) => disk[a].cachedAt - disk[b].cachedAt)
+        .slice(0, keys.length - 80)
+        .forEach((oldKey) => delete disk[oldKey]);
+    }
+    localStorage.setItem(STREAM_CACHE_KEY, JSON.stringify(disk));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function readSearchCache(queryKey: string): Track[] | null {
+  try {
+    const raw = localStorage.getItem(SEARCH_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, CachedSearchEntry>;
+    const hit = parsed?.[queryKey];
+    if (hit && Array.isArray(hit.tracks) && hit.tracks.length > 0 && Date.now() - hit.cachedAt < CACHE_TTL_24H_MS) {
+      return hit.tracks;
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  return null;
+}
+
+function writeSearchCache(queryKey: string, tracks: Track[]): void {
+  if (tracks.length === 0) return;
+  try {
+    const raw = localStorage.getItem(SEARCH_CACHE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, CachedSearchEntry>) : {};
+    const now = Date.now();
+    const cleaned: Record<string, CachedSearchEntry> = {};
+    for (const [k, v] of Object.entries(parsed || {})) {
+      if (v && typeof v.cachedAt === 'number' && now - v.cachedAt < CACHE_TTL_24H_MS) {
+        cleaned[k] = v;
+      }
+    }
+    cleaned[queryKey] = { tracks: tracks.slice(0, 30), cachedAt: now };
+    const keys = Object.keys(cleaned);
+    if (keys.length > 25) {
+      keys
+        .sort((a, b) => cleaned[a].cachedAt - cleaned[b].cachedAt)
+        .slice(0, keys.length - 25)
+        .forEach((oldKey) => delete cleaned[oldKey]);
+    }
+    localStorage.setItem(SEARCH_CACHE_KEY, JSON.stringify(cleaned));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function readCuratedCache(): CachedCuratedEntry | null {
+  try {
+    const raw = localStorage.getItem(CURATED_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedCuratedEntry;
+    if (
+      parsed &&
+      typeof parsed.cachedAt === 'number' &&
+      Date.now() - parsed.cachedAt < CACHE_TTL_24H_MS &&
+      Array.isArray(parsed.indonesia) &&
+      parsed.indonesia.length > 0
+    ) {
+      return parsed;
+    }
+  } catch {
+    // Ignore read error
+  }
+  return null;
+}
+
+function writeCuratedCache(data: Omit<CachedCuratedEntry, 'cachedAt'>): void {
+  if (data.indonesia.length === 0 && data.global.length === 0) return;
+  try {
+    const payload: CachedCuratedEntry = { ...data, cachedAt: Date.now() };
+    localStorage.setItem(CURATED_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore quota errors
+  }
+}
 
 const PIPED_MIRRORS = [
   'https://pipedapi.kavin.rocks',
@@ -200,11 +354,17 @@ function scoreClientTrackRelevance(track: Track, query: string, orderIdx: number
 
 async function fetchJsonWithTimeout<T>(
   url: string,
-  timeoutMs = 8000,
+  timeoutMs = MAX_API_TIMEOUT_MS,
   externalSignal?: AbortSignal
 ): Promise<T> {
+  const effectiveTimeout = Math.min(timeoutMs, MAX_API_TIMEOUT_MS);
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const startedAt = Date.now();
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, effectiveTimeout);
 
   const onExternalAbort = () => controller.abort();
   if (externalSignal) {
@@ -217,10 +377,16 @@ async function fetchJsonWithTimeout<T>(
 
   try {
     const res = await fetch(url, { signal: controller.signal });
+    reportApiTiming(Date.now() - startedAt, false);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
     return (await res.json()) as T;
+  } catch (err) {
+    if (timedOut && !externalSignal?.aborted) {
+      reportApiTiming(Date.now() - startedAt, true);
+    }
+    throw err;
   } finally {
     window.clearTimeout(timer);
     externalSignal?.removeEventListener('abort', onExternalAbort);
@@ -228,16 +394,19 @@ async function fetchJsonWithTimeout<T>(
 }
 
 function mapApiTrack(item: ApiTrackPayload, idx: number): Track {
+  const rawCover =
+    item.coverUrl ||
+    (item.videoId ? `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg` : DEFAULT_COVER_URL);
   return {
     id: item.id || `track-${idx}-${Date.now()}`,
     videoId: item.videoId,
     title: item.title,
+    rawTitle: item.rawTitle,
+    channelName: item.channelName,
     artist: item.artist || 'Artis',
     album: item.album || 'Streaming',
     duration: Number.isFinite(item.duration) && item.duration > 0 ? item.duration : 210,
-    coverUrl:
-      item.coverUrl ||
-      (item.videoId ? `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg` : DEFAULT_COVER_URL),
+    coverUrl: resizeCoverUrlForMode(rawCover, getCurrentNetworkMode(), 'md'),
     audioUrl: item.audioUrl,
     fallbackAudioUrls: item.fallbackAudioUrls,
     sourceType: 'online',
@@ -323,6 +492,8 @@ async function searchPipedClient(
           id: `yt-${videoId}`,
           videoId,
           title,
+          rawTitle: item.title,
+          channelName: item.uploaderName,
           artist,
           album: 'YouTube Music',
           duration: dur,
@@ -367,6 +538,8 @@ async function searchPipedClient(
           id: `yt-${item.videoId}`,
           videoId: item.videoId,
           title,
+          rawTitle: item.title,
+          channelName: item.author,
           artist,
           album: 'YouTube Music',
           duration: item.lengthSeconds && item.lengthSeconds > 40 ? Math.round(item.lengthSeconds) : 210,
@@ -511,13 +684,16 @@ async function clientDirectParallelSearch(
 export async function searchYouTubeTracks(
   query: string,
   externalSignal?: AbortSignal,
-  limit = 16
+  limit = 16,
+  mode: 'audio' | 'mv' = 'audio'
 ): Promise<Track[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
 
   try {
-    const endpoint = `/api/yt-search?q=${encodeURIComponent(trimmed)}&limit=${limit}`;
+    const endpoint = `/api/yt-search?q=${encodeURIComponent(trimmed)}&limit=${limit}${
+      mode === 'mv' ? '&mode=mv' : ''
+    }`;
     const data = await fetchJsonWithTimeout<{ tracks?: ApiTrackPayload[] }>(
       endpoint,
       7500,
@@ -564,7 +740,7 @@ export async function resolveFullStream(
   const cleanArtist = track.artist.split(/,|&|\bfeat\.?\b|\bft\.?\b/i)[0].trim();
   const cacheKey = `${cleanArtist.toLowerCase()}::${cleanTitle.toLowerCase()}`;
 
-  const cached = resolvedVideoIdCache.get(cacheKey);
+  const cached = getCachedStream(cacheKey);
   if (cached?.videoId) {
     return {
       videoId: cached.videoId,
@@ -591,7 +767,7 @@ export async function resolveFullStream(
 
     if (best?.videoId) {
       const fullDuration = best.duration >= 45 ? best.duration : undefined;
-      resolvedVideoIdCache.set(cacheKey, { videoId: best.videoId, duration: fullDuration });
+      saveCachedStream(cacheKey, best.videoId, fullDuration);
       return {
         videoId: best.videoId,
         duration: fullDuration,
@@ -632,7 +808,7 @@ export async function resolveYouTubeVideoId(
   const cleanArtist = artist.split(/,|&|\bfeat\.?\b|\bft\.?\b/i)[0].trim();
   const cacheKey = `${cleanArtist.toLowerCase()}::${cleanTitle.toLowerCase()}`;
 
-  const cached = resolvedVideoIdCache.get(cacheKey);
+  const cached = getCachedStream(cacheKey);
   if (cached?.videoId) return cached.videoId;
 
   try {
@@ -650,10 +826,11 @@ export async function resolveYouTubeVideoId(
     }
 
     if (best?.videoId) {
-      resolvedVideoIdCache.set(cacheKey, {
-        videoId: best.videoId,
-        duration: best.duration >= 45 ? best.duration : undefined,
-      });
+      saveCachedStream(
+        cacheKey,
+        best.videoId,
+        best.duration >= 45 ? best.duration : undefined
+      );
       return best.videoId;
     }
     return null;
@@ -662,8 +839,37 @@ export async function resolveYouTubeVideoId(
   }
 }
 
+const DISALLOWED_MV_KEYWORDS_REGEX =
+  /\b(lyrics?|lirik|audio\s*only|official\s*audio|static|cover|karaoke|instrumental|slowed|reverb|nightcore|lyric\s*video|8d\s*audio|sped\s*up)\b/i;
+
+function isValidOfficialMusicVideoCandidate(candidate: Track): boolean {
+  const label = `${candidate.rawTitle || candidate.title} ${candidate.channelName || ''}`.trim();
+  if (DISALLOWED_MV_KEYWORDS_REGEX.test(label)) return false;
+  if (candidate.channelName && /\s-\s*Topic$/i.test(candidate.channelName)) return false;
+  return Boolean(candidate.videoId);
+}
+
+function pickBestOfficialMusicVideo(candidates: Track[]): Track | null {
+  const filtered = candidates.filter(isValidOfficialMusicVideoCandidate);
+  if (filtered.length === 0) return null;
+
+  const explicitMv = filtered.find((c) => {
+    const t = `${c.rawTitle || c.title}`.toLowerCase();
+    return (
+      t.includes('official music video') ||
+      t.includes('official mv') ||
+      t.includes('official video') ||
+      t.includes('music video') ||
+      /\bmv\b/.test(t)
+    );
+  });
+
+  return explicitMv || filtered[0] || null;
+}
+
 /**
- * Resolves a real moving Official Music Video videoId for Ambient Video Backdrop.
+ * Resolves a real moving Official Music Video videoId for Focus Zone & Ambient Video Backdrop.
+ * Strictly rejects Lyrics, Audio Only, Static, and Cover videos.
  */
 export async function resolveYouTubeMusicVideoId(
   artist: string,
@@ -678,29 +884,21 @@ export async function resolveYouTubeMusicVideoId(
   if (cached) return cached;
 
   try {
-    const query = `${cleanArtist} ${cleanTitle} official music video`;
-    const candidates = await searchYouTubeTracks(query, externalSignal, 8);
-    const preferred =
-      candidates.find((c) => {
-        const t = c.title.toLowerCase();
-        return (
-          (t.includes('official music video') ||
-            t.includes('official video') ||
-            t.includes('music video') ||
-            t.includes('mv')) &&
-          !t.includes('official audio') &&
-          !t.includes('lyrics')
-        );
-      }) ||
-      candidates.find((c) => !c.title.toLowerCase().includes('official audio')) ||
-      candidates[0] ||
-      null;
+    const primaryQuery = `${cleanTitle} ${cleanArtist} Official Music Video`;
+    const primaryCandidates = await searchYouTubeTracks(primaryQuery, externalSignal, 10, 'mv');
+    let best = pickBestOfficialMusicVideo(primaryCandidates);
 
-    const best = preferred?.videoId || null;
-    if (best) {
-      resolvedMusicVideoIdCache.set(cacheKey, best);
+    if (!best) {
+      const secondaryQuery = `${cleanTitle} ${cleanArtist} Official MV`;
+      const secondaryCandidates = await searchYouTubeTracks(secondaryQuery, externalSignal, 10, 'mv');
+      best = pickBestOfficialMusicVideo(secondaryCandidates);
     }
-    return best;
+
+    const mvId = best?.videoId || null;
+    if (mvId) {
+      resolvedMusicVideoIdCache.set(cacheKey, mvId);
+    }
+    return mvId;
   } catch {
     return null;
   }
@@ -713,22 +911,30 @@ export async function searchOnlineTracks(
   query: string,
   externalSignal?: AbortSignal,
   limit = 40
-): Promise<{ tracks: Track[]; source: 'catalog' | 'client-fallback' }> {
+): Promise<{ tracks: Track[]; source: 'catalog' | 'client-fallback' | 'cache' }> {
   const trimmed = query.trim();
   if (!trimmed) {
     return { tracks: [], source: 'catalog' };
   }
 
+  const cacheKey = normalizeSearchText(trimmed);
+  const cachedHit = cacheKey ? readSearchCache(cacheKey) : null;
+  if (cachedHit && cachedHit.length > 0) {
+    return { tracks: cachedHit.slice(0, limit), source: 'cache' };
+  }
+
   try {
     const data = await fetchJsonWithTimeout<{ tracks?: ApiTrackPayload[] }>(
       `/api/music-search?q=${encodeURIComponent(trimmed)}&limit=${limit}`,
-      9000,
+      MAX_API_TIMEOUT_MS,
       externalSignal
     );
     const items = Array.isArray(data?.tracks) ? data.tracks : [];
     if (items.length > 0) {
+      const mapped = items.map(mapApiTrack).slice(0, limit);
+      if (cacheKey) writeSearchCache(cacheKey, mapped);
       return {
-        tracks: items.map(mapApiTrack).slice(0, limit),
+        tracks: mapped,
         source: 'catalog',
       };
     }
@@ -739,6 +945,9 @@ export async function searchOnlineTracks(
   }
 
   const fallback = await clientDirectParallelSearch(trimmed, externalSignal);
+  if (cacheKey && fallback.length > 0) {
+    writeSearchCache(cacheKey, fallback);
+  }
   return { tracks: fallback, source: 'client-fallback' };
 }
 
@@ -816,13 +1025,27 @@ export async function fetchCuratedFeeds(externalSignal?: AbortSignal): Promise<{
   viral: Track[];
   indieRnb: Track[];
 }> {
+  const cached = readCuratedCache();
+  if (cached && getCurrentNetworkMode() === 'lite') {
+    return {
+      indonesia: cached.indonesia,
+      global: cached.global,
+      viral: cached.viral,
+      indieRnb: cached.indieRnb,
+    };
+  }
+
   let indonesia: Track[] = [];
   let global: Track[] = [];
   let viral: Track[] = [];
   let indieRnb: Track[] = [];
 
   try {
-    const data = await fetchJsonWithTimeout<CuratedResponse>('/api/curated', 10000, externalSignal);
+    const data = await fetchJsonWithTimeout<CuratedResponse>(
+      '/api/curated',
+      MAX_API_TIMEOUT_MS,
+      externalSignal
+    );
     indonesia = (data.indonesia || []).map(mapApiTrack);
     global = (data.global || []).map(mapApiTrack);
     viral = (data.viral || []).map(mapApiTrack);
@@ -844,5 +1067,15 @@ export async function fetchCuratedFeeds(externalSignal?: AbortSignal): Promise<{
     viral = gbDirect;
   }
 
+  if (indonesia.length === 0 && global.length === 0 && cached) {
+    return {
+      indonesia: cached.indonesia,
+      global: cached.global,
+      viral: cached.viral,
+      indieRnb: cached.indieRnb,
+    };
+  }
+
+  writeCuratedCache({ indonesia, global, viral, indieRnb });
   return { indonesia, global, viral, indieRnb };
 }

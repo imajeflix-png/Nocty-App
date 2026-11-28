@@ -52,7 +52,7 @@ export const TrackActionsMenu: React.FC<TrackActionsMenuProps> = ({
       {open && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute right-0 top-10 z-50 w-56 rounded-2xl bg-[#18181D]/92 backdrop-blur-2xl border border-white/[0.10] shadow-2xl p-1.5 text-sm text-white"
+          className="absolute right-0 top-10 z-50 w-56 rounded-2xl bg-[#18181D]/92 backdrop-blur-md border border-white/[0.10] shadow-2xl p-1.5 text-sm text-white"
         >
           <button
             type="button"

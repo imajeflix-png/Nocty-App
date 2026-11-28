@@ -34,7 +34,7 @@ export const CreatePlaylistModal: React.FC = () => {
         aria-modal="true"
         aria-labelledby="create-playlist-title"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl bg-[#16161B]/90 backdrop-blur-2xl border border-white/[0.10] p-6 shadow-2xl"
+        className="w-full max-w-md rounded-2xl bg-[#16161B]/90 backdrop-blur-md border border-white/[0.10] p-6 shadow-2xl"
       >
         <div className="flex items-center justify-between mb-5">
           <h2 id="create-playlist-title" className="font-display text-lg font-semibold text-white">

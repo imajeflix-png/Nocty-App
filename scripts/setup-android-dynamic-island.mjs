@@ -29,20 +29,42 @@ if (!fs.existsSync(javaPackageDir)) {
 
 const dynamicIslandPluginJava = `package ${appId};
 
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 import java.lang.ref.WeakReference;
 
-@CapacitorPlugin(name = "DynamicIsland")
+@CapacitorPlugin(
+    name = "DynamicIsland",
+    permissions = {
+        @Permission(
+            strings = { Manifest.permission.POST_NOTIFICATIONS },
+            alias = "notifications"
+        ),
+        @Permission(
+            strings = { Manifest.permission.CAMERA },
+            alias = "camera"
+        ),
+        @Permission(
+            strings = { Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_EXTERNAL_STORAGE },
+            alias = "storage"
+        )
+    }
+)
 public class DynamicIslandPlugin extends Plugin {
 
     private static final String PREFS_NAME = "nocty_overlay_prefs";
@@ -76,8 +98,9 @@ public class DynamicIslandPlugin extends Plugin {
         String artist = call.getString("artist", "Nocty Music");
         boolean isPlaying = Boolean.TRUE.equals(call.getBoolean("isPlaying", false));
         String artwork = call.getString("artwork", "");
+        boolean showOverlay = Boolean.TRUE.equals(call.getBoolean("showOverlay", true));
 
-        if (isPlaying && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+        if (showOverlay && isPlaying && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
             promptOverlayPermissionOnce(context);
         }
 
@@ -87,6 +110,7 @@ public class DynamicIslandPlugin extends Plugin {
         serviceIntent.putExtra(DynamicIslandOverlayService.EXTRA_ARTIST, artist);
         serviceIntent.putExtra(DynamicIslandOverlayService.EXTRA_IS_PLAYING, isPlaying);
         serviceIntent.putExtra(DynamicIslandOverlayService.EXTRA_ARTWORK, artwork);
+        serviceIntent.putExtra(DynamicIslandOverlayService.EXTRA_SHOW_OVERLAY, showOverlay);
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -132,6 +156,88 @@ public class DynamicIslandPlugin extends Plugin {
         Context context = getContext();
         if (context != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
             openOverlaySettings(context);
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void checkSystemPermissions(PluginCall call) {
+        Context context = getContext();
+        if (context == null) {
+            call.reject("Context unavailable");
+            return;
+        }
+
+        String notifState = "granted";
+        if (Build.VERSION.SDK_INT >= 33) {
+            PermissionState state = getPermissionState("notifications");
+            if (state == PermissionState.GRANTED ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                notifState = "granted";
+            } else if (state == PermissionState.DENIED) {
+                notifState = "denied";
+            } else {
+                notifState = "prompt";
+            }
+        }
+
+        String cameraState = "prompt";
+        PermissionState camPerm = getPermissionState("camera");
+        if (camPerm == PermissionState.GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            cameraState = "granted";
+        } else if (camPerm == PermissionState.DENIED) {
+            cameraState = "denied";
+        }
+
+        boolean overlayGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(context);
+
+        JSObject ret = new JSObject();
+        ret.put("notifications", notifState);
+        ret.put("camera", cameraState);
+        ret.put("overlay", overlayGranted ? "granted" : "prompt");
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestNotificationPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT < 33) {
+            JSObject ret = new JSObject();
+            ret.put("state", "granted");
+            call.resolve(ret);
+            return;
+        }
+        if (getPermissionState("notifications") == PermissionState.GRANTED) {
+            JSObject ret = new JSObject();
+            ret.put("state", "granted");
+            call.resolve(ret);
+            return;
+        }
+        requestPermissionForAlias("notifications", call, "notificationsPermsCallback");
+    }
+
+    @PermissionCallback
+    private void notificationsPermsCallback(PluginCall call) {
+        PermissionState state = getPermissionState("notifications");
+        JSObject ret = new JSObject();
+        ret.put("state", state == PermissionState.GRANTED ? "granted" : "denied");
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        Context context = getContext();
+        if (context != null) {
+            try {
+                Intent intent = new Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + context.getPackageName())
+                );
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+            } catch (Exception ignored) {
+                // Ignore if device OEM blocks details intent
+            }
         }
         call.resolve();
     }
@@ -219,6 +325,7 @@ public class DynamicIslandOverlayService extends Service {
     public static final String EXTRA_ARTIST = "artist";
     public static final String EXTRA_IS_PLAYING = "isPlaying";
     public static final String EXTRA_ARTWORK = "artwork";
+    public static final String EXTRA_SHOW_OVERLAY = "showOverlay";
 
     private static final String CHANNEL_ID = "nocty_media_playback";
     private static final int NOTIFICATION_ID = 7701;
@@ -237,6 +344,7 @@ public class DynamicIslandOverlayService extends Service {
     private String currentTitle = "Nocty";
     private String currentArtist = "Nocty Music";
     private boolean currentIsPlaying = false;
+    private boolean currentShowOverlay = true;
     private String currentArtworkUrl = "";
     private Bitmap currentArtworkBitmap = null;
 
@@ -281,6 +389,7 @@ public class DynamicIslandOverlayService extends Service {
         String newArtist = intent.getStringExtra(EXTRA_ARTIST);
         boolean newIsPlaying = intent.getBooleanExtra(EXTRA_IS_PLAYING, currentIsPlaying);
         String newArtwork = intent.getStringExtra(EXTRA_ARTWORK);
+        currentShowOverlay = intent.getBooleanExtra(EXTRA_SHOW_OVERLAY, true);
 
         if (newTitle != null && !newTitle.isEmpty()) currentTitle = newTitle;
         if (newArtist != null && !newArtist.isEmpty()) currentArtist = newArtist;
@@ -288,7 +397,11 @@ public class DynamicIslandOverlayService extends Service {
 
         updateMediaSessionState();
         startOrUpdateForegroundNotification();
-        ensureOrUpdateOverlay();
+        if (currentShowOverlay) {
+            ensureOrUpdateOverlay();
+        } else {
+            removeOverlay();
+        }
 
         if (newArtwork != null && !newArtwork.equals(currentArtworkUrl)) {
             currentArtworkUrl = newArtwork;

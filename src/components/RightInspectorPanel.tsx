@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowDown, ArrowUp, GripVertical, ListOrdered, Mic2, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, GripVertical, ListOrdered, Loader2, Mic2, Sparkles, Trash2, X } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 import { formatDuration } from '../utils/audioUtils';
 import { CoverArt } from './CoverArt';
@@ -15,6 +15,10 @@ export const RightInspectorPanel: React.FC = () => {
     currentTrack,
     currentMood,
     isPlaying,
+    isMoodShuffle,
+    isMoodShuffleLoading,
+    moodSessionProfile,
+    toggleMoodShuffle,
     playTrack,
     removeFromQueue,
     reorderQueue,
@@ -30,11 +34,11 @@ export const RightInspectorPanel: React.FC = () => {
   const { primary, secondary } = ambientPalette;
 
   const panelBody = (
-    <div className="relative flex flex-col h-full bg-white/[0.05] backdrop-blur-2xl border border-white/[0.08] rounded-2xl overflow-hidden">
+    <div className="relative flex flex-col h-full bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] rounded-[28px] overflow-hidden">
       {/* Dual-Color Cover-Adaptive Ambient Aura behind Lyrics / Queue */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 pointer-events-none blur-3xl opacity-25 transition-all duration-1000"
+        className="ambient-aura-layer absolute inset-0 pointer-events-none blur-3xl opacity-25 transition-all duration-1000"
         style={{
           background:
             rightPanelTab === 'lyrics'
@@ -97,13 +101,40 @@ export const RightInspectorPanel: React.FC = () => {
         ) : (
           <div className="h-full flex flex-col">
             <div className="px-4 py-2.5 flex flex-col gap-2 border-b border-white/[0.06]">
-              {currentMood && (
-                <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                {currentMood ? (
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.08] border border-white/[0.10] text-[11px] font-medium text-white/90">
                     <AppleEmoji unified={currentMood.emojiUnified} size={13} />
                     <span>{currentMood.badgeText}</span>
                   </div>
-                </div>
+                ) : (
+                  <span className="text-[11px] text-white/45">Antrean sesi</span>
+                )}
+
+                <button
+                  type="button"
+                  onClick={toggleMoodShuffle}
+                  aria-pressed={isMoodShuffle}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium transition-colors whitespace-nowrap ${
+                    isMoodShuffle
+                      ? 'bg-white text-[#0B0B0D] border-white/30'
+                      : 'bg-white/[0.06] hover:bg-white/[0.12] border-white/[0.10] text-white/80'
+                  }`}
+                >
+                  {isMoodShuffleLoading ? (
+                    <Loader2 className="w-3 h-3 animate-spin" strokeWidth={2} />
+                  ) : (
+                    <Sparkles className="w-3 h-3" strokeWidth={2} />
+                  )}
+                  <span>Mood Shuffle</span>
+                </button>
+              </div>
+              {isMoodShuffle && moodSessionProfile && (
+                <p className="text-[11px] text-white/65 leading-snug">
+                  {moodSessionProfile.moodProfile} ·{' '}
+                  <span className="font-mono-tabular">{moodSessionProfile.tempoBpm} BPM</span> (
+                  {moodSessionProfile.tempoLabel})
+                </p>
               )}
               <div className="flex items-center justify-between">
                 <span className="text-xs text-white/50">Seret lagu untuk ubah urutan</span>

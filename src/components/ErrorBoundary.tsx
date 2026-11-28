@@ -26,7 +26,7 @@ export class ErrorBoundary extends React.Component<
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-[#0B0B0D] text-[#F5F5F7] flex items-center justify-center p-6">
-          <div className="max-w-md w-full rounded-2xl bg-white/[0.05] backdrop-blur-2xl border border-white/[0.08] p-6 text-center space-y-4">
+          <div className="max-w-md w-full rounded-2xl bg-white/[0.05] backdrop-blur-md border border-white/[0.08] p-6 text-center space-y-4">
             <h1 className="font-display text-xl font-bold text-white">Nocty mengalami kendala</h1>
             <p className="text-sm text-white/55">{this.state.message}</p>
             <button

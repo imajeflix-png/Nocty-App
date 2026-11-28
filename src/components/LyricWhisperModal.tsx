@@ -190,11 +190,11 @@ export const LyricWhisperModal: React.FC = () => {
         aria-hidden="true"
       />
 
-      <div className="relative z-10 w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-[#121216]/90 backdrop-blur-2xl border border-white/[0.12] shadow-2xl overflow-hidden">
+      <div className="relative z-10 w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-[#121216]/90 backdrop-blur-md border border-white/[0.12] shadow-2xl overflow-hidden">
         {/* Subtle Ambient Cover Aura */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -top-24 inset-x-0 h-52 blur-3xl opacity-25"
+          className="ambient-aura-layer pointer-events-none absolute -top-24 inset-x-0 h-52 blur-3xl opacity-25"
           style={{
             background: `radial-gradient(circle at 30% 30%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.9), rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.7), transparent 72%)`,
           }}

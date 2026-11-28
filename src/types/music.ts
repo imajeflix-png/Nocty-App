@@ -9,6 +9,8 @@ export interface Track {
   id: string;
   videoId?: string;
   title: string;
+  rawTitle?: string;
+  channelName?: string;
   artist: string;
   album?: string;
   duration: number; // in seconds
@@ -33,7 +35,15 @@ export interface Playlist {
 
 export type LoopMode = 'off' | 'all' | 'one';
 
-export type NavView = 'home' | 'explore' | 'liked' | 'playlist' | 'library' | 'local';
+export type NavView =
+  | 'home'
+  | 'explore'
+  | 'studio'
+  | 'liked'
+  | 'playlist'
+  | 'library'
+  | 'local'
+  | 'settings';
 
 export type RightPanelTab = 'queue' | 'lyrics' | null;
 

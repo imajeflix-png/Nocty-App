@@ -296,10 +296,10 @@ export function savePlayerPrefs(prefs: PlayerPrefs): void {
 export function loadAmbientVideoPref(): boolean {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.AMBIENT_VIDEO);
-    if (raw === null) return true;
-    return raw !== 'false';
+    if (raw === null) return false;
+    return raw === 'true';
   } catch {
-    return true;
+    return false;
   }
 }
 

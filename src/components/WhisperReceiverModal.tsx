@@ -59,16 +59,16 @@ export const WhisperReceiverModal: React.FC = () => {
       className="fixed inset-0 z-[75] flex items-center justify-center p-4"
     >
       <div
-        className="fixed inset-0 bg-black/75 backdrop-blur-xl"
+        className="fixed inset-0 bg-black/75 backdrop-blur-md"
         onClick={handleDismiss}
         aria-hidden="true"
       />
 
-      <div className="relative z-10 w-full max-w-md rounded-3xl bg-[#121216]/88 backdrop-blur-2xl border border-white/[0.14] shadow-[0_32px_90px_rgba(0,0,0,0.8)] overflow-hidden">
+      <div className="relative z-10 w-full max-w-md rounded-3xl bg-[#121216]/88 backdrop-blur-md border border-white/[0.14] shadow-[0_24px_64px_rgba(0,0,0,0.75)] overflow-hidden">
         {/* Soft Cover Ambient Mesh */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -top-24 inset-x-0 h-60 blur-3xl opacity-30"
+          className="ambient-aura-layer pointer-events-none absolute -top-24 inset-x-0 h-60 blur-3xl opacity-30"
           style={{
             background: `
               radial-gradient(circle at 25% 25%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.95) 0%, transparent 65%),

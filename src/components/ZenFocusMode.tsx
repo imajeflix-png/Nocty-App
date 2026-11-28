@@ -1,40 +1,48 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  AudioLines,
-  Check,
   ChevronDown,
+  Disc3,
+  Film,
   Heart,
+  Image as ImageIcon,
   ListOrdered,
   Loader2,
-  Moon,
-  Palette,
   Pause,
   Play,
   Repeat,
   Repeat1,
-  Share2,
+  Settings,
   Shuffle,
   SkipBack,
   SkipForward,
+  Sparkles,
   Trash2,
+  WifiOff,
   X,
 } from 'lucide-react';
+import { useNetworkMode } from '../context/NetworkModeContext';
 import { usePlayer } from '../context/PlayerContext';
 import { formatDuration } from '../utils/audioUtils';
+import { triggerHaptic } from '../utils/haptics';
 import { AppleEmoji } from './AppleEmoji';
 import { CoverArt } from './CoverArt';
 import { EqualizerBars } from './EqualizerBars';
 import { SyncedLyricsList } from './SyncedLyricsList';
 
-const SLEEP_PRESET_MINUTES = [15, 30, 60] as const;
+type FocusViewMode = 'cover' | 'vinyl' | 'mv';
 
-function formatSleepCountdown(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
+const FOCUS_VIEW_MODES: Array<{
+  id: FocusViewMode;
+  label: string;
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+}> = [
+  { id: 'cover', label: 'Sampul', icon: ImageIcon },
+  { id: 'vinyl', label: 'Vinyl', icon: Disc3 },
+  { id: 'mv', label: 'Official MV', icon: Film },
+];
 
 export const ZenFocusMode: React.FC = () => {
+  const { mode: networkMode, isAppInBackground, acceptNormalMode } = useNetworkMode();
   const {
     isZenMode,
     setIsZenMode,
@@ -44,65 +52,74 @@ export const ZenFocusMode: React.FC = () => {
     currentTime,
     duration,
     isShuffled,
+    isMoodShuffle,
+    isMoodShuffleLoading,
+    moodSessionProfile,
     loopMode,
     ambientPalette,
     queueTracks,
     currentMood,
     ambientVideoId,
+    isResolvingAmbientVideo,
+    setIsFocusMvActive,
     isAmbientVideoEnabled,
-    toggleAmbientVideo,
-    crossfadeDuration,
-    cycleCrossfadeDuration,
     playTrack,
     togglePlayPause,
     playNext,
     playPrev,
     seekTo,
     toggleShuffle,
+    toggleMoodShuffle,
     cycleLoopMode,
     toggleLike,
     isLiked,
     removeFromQueue,
     clearUpcomingQueue,
-    setIsTwinModalOpen,
-    setIsWhisperComposerOpen,
-    setIsLyricCardOpen,
-    sleepTimerRemaining,
-    sleepTimerMode,
-    setSleepTimerMinutes,
-    setSleepTimerEndOfTrack,
-    cancelSleepTimer,
+    setActiveView,
+    setIsStudioSheetOpen,
     resolvedTheme,
     isDynamicThemeSync,
-    toggleDynamicThemeSync,
   } = usePlayer();
 
   const [isQueueOpen, setIsQueueOpen] = useState(false);
-  const [isSleepMenuOpen, setIsSleepMenuOpen] = useState(false);
+  const [focusViewMode, setFocusViewMode] = useState<FocusViewMode>('cover');
+  const [showcaseDragX, setShowcaseDragX] = useState(0);
+  const [isDraggingShowcase, setIsDraggingShowcase] = useState(false);
   const [dragOffsetY, setDragOffsetY] = useState(0);
   const [isDraggingDown, setIsDraggingDown] = useState(false);
   const [isClosingAnim, setIsClosingAnim] = useState(false);
+
   const seekRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const touchStartYRef = useRef<number | null>(null);
   const canSwipeDismissRef = useRef(false);
 
+  const showcaseTouchRef = useRef<{
+    startX: number;
+    startY: number;
+    axis: 'x' | 'y' | null;
+  } | null>(null);
+
+  useEffect(() => {
+    setIsFocusMvActive(isZenMode && focusViewMode === 'mv');
+  }, [focusViewMode, isZenMode, setIsFocusMvActive]);
+
   useEffect(() => {
     if (!isZenMode) {
       setIsQueueOpen(false);
-      setIsSleepMenuOpen(false);
       setDragOffsetY(0);
       setIsDraggingDown(false);
       setIsClosingAnim(false);
+      setShowcaseDragX(0);
+      setIsDraggingShowcase(false);
       touchStartYRef.current = null;
       canSwipeDismissRef.current = false;
+      showcaseTouchRef.current = null;
       return;
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isSleepMenuOpen) {
-          setIsSleepMenuOpen(false);
-        } else if (isQueueOpen) {
+        if (isQueueOpen) {
           setIsQueueOpen(false);
         } else {
           setIsZenMode(false);
@@ -111,29 +128,41 @@ export const ZenFocusMode: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isQueueOpen, isSleepMenuOpen, isZenMode, setIsZenMode]);
+  }, [isQueueOpen, isZenMode, setIsZenMode]);
 
   if (!isZenMode) return null;
 
   const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
   const liked = currentTrack ? isLiked(currentTrack.id) : false;
-  const isSleepActive = sleepTimerMode !== 'off';
   const { primary, secondary, gradientIntensity } = ambientPalette;
   const accentStyleColor = isDynamicThemeSync ? primary.hex : undefined;
+
+  const wantsMvBackdrop = focusViewMode === 'mv' || isAmbientVideoEnabled;
   const isAmbientVideoShowing =
-    isAmbientVideoEnabled &&
+    wantsMvBackdrop &&
+    networkMode === 'normal' &&
+    !isAppInBackground &&
     Boolean(ambientVideoId) &&
     currentTrack?.sourceType !== 'local';
 
+  const selectFocusMode = (nextMode: FocusViewMode) => {
+    if (nextMode === focusViewMode) return;
+    triggerHaptic(12);
+    setFocusViewMode(nextMode);
+  };
+
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (isQueueOpen || isSleepMenuOpen || isClosingAnim) return;
+    if (isQueueOpen || isClosingAnim) return;
+    if ((e.target as HTMLElement | null)?.closest('[data-focus-showcase="true"]')) {
+      canSwipeDismissRef.current = false;
+      return;
+    }
     const outerTop = scrollContainerRef.current?.scrollTop ?? 0;
     if (outerTop > 2) {
       canSwipeDismissRef.current = false;
       return;
     }
 
-    // Do not hijack scroll when user is scrolling inside a scrolled nested container (e.g. lyrics box)
     let node = e.target as HTMLElement | null;
     while (node && node !== e.currentTarget) {
       if (node !== scrollContainerRef.current && node.scrollHeight > node.clientHeight + 4 && node.scrollTop > 2) {
@@ -182,6 +211,53 @@ export const ZenFocusMode: React.FC = () => {
     }
   };
 
+  const handleShowcaseTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length !== 1) return;
+    showcaseTouchRef.current = {
+      startX: e.touches[0].clientX,
+      startY: e.touches[0].clientY,
+      axis: null,
+    };
+  };
+
+  const handleShowcaseTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const state = showcaseTouchRef.current;
+    if (!state || e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - state.startX;
+    const dy = e.touches[0].clientY - state.startY;
+
+    if (!state.axis) {
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.15) {
+        state.axis = 'x';
+        setIsDraggingShowcase(true);
+      } else if (Math.abs(dy) > 10) {
+        state.axis = 'y';
+      }
+    }
+
+    if (state.axis === 'x') {
+      e.stopPropagation();
+      const clamped = Math.max(-110, Math.min(110, dx * 0.65));
+      setShowcaseDragX(clamped);
+    }
+  };
+
+  const handleShowcaseTouchEnd = () => {
+    const state = showcaseTouchRef.current;
+    showcaseTouchRef.current = null;
+    setIsDraggingShowcase(false);
+
+    if (state?.axis === 'x') {
+      const currentIdx = FOCUS_VIEW_MODES.findIndex((m) => m.id === focusViewMode);
+      if (showcaseDragX <= -36 && currentIdx < FOCUS_VIEW_MODES.length - 1) {
+        selectFocusMode(FOCUS_VIEW_MODES[currentIdx + 1].id);
+      } else if (showcaseDragX >= 36 && currentIdx > 0) {
+        selectFocusMode(FOCUS_VIEW_MODES[currentIdx - 1].id);
+      }
+    }
+    setShowcaseDragX(0);
+  };
+
   return (
     <div
       role="dialog"
@@ -205,7 +281,7 @@ export const ZenFocusMode: React.FC = () => {
           : 'bg-[#F2F4F8] dark:bg-[#0B0B0D]'
       }`}
     >
-      {/* Internal Solid Base + Clear Spotify-Canvas-Style YouTube Music Video OR Cover Ambient Glow */}
+      {/* Internal Solid Base + Fullscreen Official Music Video OR Cover Ambient Glow */}
       <div
         aria-hidden="true"
         className={`pointer-events-none absolute inset-0 overflow-hidden ${
@@ -216,17 +292,17 @@ export const ZenFocusMode: React.FC = () => {
           <>
             <iframe
               key={`zen-mv-${ambientVideoId}`}
-              title="Ambient Music Video Background"
+              title="Official Music Video Background"
               src={`https://www.youtube.com/embed/${ambientVideoId}?autoplay=1&mute=1&loop=1&playlist=${ambientVideoId}&controls=0&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1`}
               allow="autoplay; encrypted-media; picture-in-picture"
               tabIndex={-1}
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full w-[177.78vh] h-[56.25vw] scale-115 opacity-75 pointer-events-none border-0"
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full w-[177.78vh] h-[56.25vw] scale-115 opacity-80 pointer-events-none border-0"
             />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/30 to-[#0B0B0D]" />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/65 via-black/30 to-[#0B0B0D]/95" />
           </>
         ) : (
           <div
-            className="absolute inset-0 blur-3xl transition-all duration-1000"
+            className="ambient-aura-layer absolute inset-0 blur-3xl transition-all duration-1000"
             style={{
               opacity:
                 resolvedTheme === 'light'
@@ -248,112 +324,50 @@ export const ZenFocusMode: React.FC = () => {
 
       {/* Slim Single-Row Compact Header */}
       <header className="relative z-10 flex items-center justify-between gap-2 px-4 sm:px-8 py-2 border-b border-white/[0.06] bg-black/25 backdrop-blur-md shrink-0">
-        <span className="font-display text-base sm:text-lg font-bold tracking-tight text-white shrink-0">
-          Nocty
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="font-display text-base sm:text-lg font-bold tracking-tight text-white">
+            Nocty
+          </span>
+          {networkMode === 'lite' && (
+            <button
+              type="button"
+              onClick={acceptNormalMode}
+              title="Mode Ringan Aktif — klik untuk kembali ke Mode Normal"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-400/15 hover:bg-amber-400/25 border border-amber-300/30 text-amber-200 transition-colors whitespace-nowrap"
+            >
+              <WifiOff className="w-3 h-3 shrink-0" strokeWidth={2} />
+              <span className="hidden sm:inline">Mode Ringan Aktif</span>
+            </button>
+          )}
+        </div>
 
         <div className="flex items-center gap-1.5 flex-nowrap justify-end">
-          <button
-            type="button"
-            onClick={toggleDynamicThemeSync}
-            aria-pressed={isDynamicThemeSync}
-            aria-label={isDynamicThemeSync ? 'Dynamic Theme Sync aktif' : 'Dynamic Theme Sync nonaktif'}
-            title="Sinkronkan warna aksen UI dengan cover album"
-            className="relative w-7 h-7 rounded-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] flex items-center justify-center text-white transition-colors shrink-0"
-            style={
-              isDynamicThemeSync
-                ? { borderColor: `rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.55)` }
-                : undefined
-            }
-          >
-            <Palette className="w-3.5 h-3.5" strokeWidth={1.85} />
-            {isDynamicThemeSync && (
-              <span
-                aria-hidden="true"
-                className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full"
-                style={{ backgroundColor: primary.hex }}
-              />
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsSleepMenuOpen((prev) => !prev)}
-            aria-label="Sleep Timer"
-            aria-expanded={isSleepMenuOpen}
-            title="Atur Sleep Timer (15, 30, 60 menit)"
-            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-              isSleepActive
-                ? 'bg-white text-[#0B0B0D] border-white/20'
-                : 'bg-white/[0.08] hover:bg-white/[0.14] border-white/[0.10] text-white'
-            }`}
-          >
-            <Moon className="w-3.5 h-3.5 shrink-0" strokeWidth={1.85} />
-            <span className="hidden sm:inline">Sleep</span>
-            {isSleepActive && (
-              <span className="font-mono-tabular text-[11px] opacity-85">
-                {sleepTimerMode === 'countdown' && sleepTimerRemaining !== null
-                  ? formatSleepCountdown(sleepTimerRemaining)
-                  : 'Akhir'}
-              </span>
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={cycleCrossfadeDuration}
-            aria-label={`Cross-fade: ${crossfadeDuration > 0 ? `${crossfadeDuration} detik` : 'Mati'}`}
-            title="Klik untuk mengubah durasi transisi cross-fade antar lagu"
-            className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] text-xs font-medium text-white transition-colors whitespace-nowrap shrink-0"
-          >
-            <AudioLines className="w-3.5 h-3.5 text-white/75 shrink-0" strokeWidth={1.85} />
-            <span className="text-white/85">Crossfade</span>
-            <span className="font-mono-tabular text-[11px] text-white/65">
-              {crossfadeDuration > 0 ? `${crossfadeDuration}d` : 'OFF'}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            role="switch"
-            aria-checked={isAmbientVideoEnabled}
-            aria-label="Ambient Video"
-            onClick={toggleAmbientVideo}
-            title={
-              currentTrack?.sourceType === 'local'
-                ? 'Ambient Video otomatis nonaktif untuk MP3 lokal'
-                : 'Tampilkan video klip YouTube di latar belakang'
-            }
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] text-xs font-medium text-white transition-colors whitespace-nowrap shrink-0"
-          >
-            <span className="text-white/90 sm:hidden">Video</span>
-            <span className="hidden sm:inline text-white/90">Ambient Video</span>
-            <span
-              aria-hidden="true"
-              className={`relative inline-flex h-3.5 w-6 shrink-0 items-center rounded-full transition-colors duration-200 ${
-                isAmbientVideoEnabled ? 'bg-white' : 'bg-white/20'
-              }`}
-            >
-              <span
-                className={`inline-block h-2.5 w-2.5 rounded-full transition-transform duration-200 ${
-                  isAmbientVideoEnabled
-                    ? 'translate-x-3 bg-[#0B0B0D]'
-                    : 'translate-x-0.5 bg-slate-500 dark:bg-white/80'
-                }`}
-              />
-            </span>
-          </button>
-
+          {/* Tombol Antrean */}
           <button
             type="button"
             onClick={() => setIsQueueOpen(true)}
             aria-label="Antrean Pemutaran"
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.10] text-xs font-medium text-white transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.12] text-xs font-medium text-white transition-colors whitespace-nowrap shrink-0"
           >
             <ListOrdered className="w-3.5 h-3.5" strokeWidth={1.85} />
             <span>Antrean</span>
           </button>
 
+          {/* Ikon Roda Gigi Settings (Apple Liquid Glass) */}
+          <button
+            type="button"
+            onClick={() => {
+              setIsZenMode(false);
+              setActiveView('settings');
+            }}
+            aria-label="Pengaturan Nocty"
+            title="Pengaturan"
+            className="w-8 h-8 rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.15] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22)] flex items-center justify-center text-white/85 hover:text-white transition-colors shrink-0"
+          >
+            <Settings className="w-3.5 h-3.5" strokeWidth={1.9} />
+          </button>
+
+          {/* Minimize Now Playing */}
           <button
             type="button"
             onClick={() => setIsZenMode(false)}
@@ -366,28 +380,202 @@ export const ZenFocusMode: React.FC = () => {
         </div>
       </header>
 
-      {/* Single Scrollable Vertical Layout: Cover -> Title/Artist -> Progress & Controls -> Social Row -> Synced Lyrics */}
+      {/* Single Scrollable Vertical Layout: Mode Switcher + Swipeable Showcase -> Title/Artist -> Progress & Controls -> Studio -> Lyrics */}
       <div
         ref={scrollContainerRef}
-        className="relative z-10 flex-1 min-h-0 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7"
+        className="relative z-10 flex-1 min-h-0 overflow-y-auto px-4 sm:px-8 py-4 sm:py-6"
       >
         <div className="w-full max-w-xl mx-auto flex flex-col items-center gap-5 pb-10">
-          {/* 1. Album Cover */}
-          <div className="relative shrink-0 pt-1">
-            <div
-              aria-hidden="true"
-              className="absolute -inset-6 top-5 rounded-3xl blur-3xl transition-all duration-1000"
-              style={{
-                opacity: Math.min(0.65, gradientIntensity * 1.1),
-                background: `radial-gradient(circle, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.85), rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.6), transparent 72%)`,
-              }}
-            />
-            <CoverArt
-              src={currentTrack?.coverUrl}
-              alt={currentTrack?.title || 'Nocty'}
-              className="relative w-52 h-52 sm:w-64 sm:h-64 lg:w-72 lg:h-72 shadow-[0_28px_70px_rgba(0,0,0,0.75)] ring-1 ring-white/12"
-              roundedClass="rounded-2xl"
-            />
+          {/* Mode Indicator Pills: Sampul • Vinyl • Official MV */}
+          <div
+            role="tablist"
+            aria-label="Mode tampilan pemutar"
+            className="inline-flex items-center gap-1 p-1 rounded-full bg-white/[0.08] backdrop-blur-xl border border-white/[0.14] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.16)]"
+          >
+            {FOCUS_VIEW_MODES.map((mode) => {
+              const Icon = mode.icon;
+              const selected = focusViewMode === mode.id;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => selectFocusMode(mode.id)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold transition-all duration-200 whitespace-nowrap ${
+                    selected
+                      ? 'bg-white text-[#0B0B0D] shadow-sm'
+                      : 'text-white/65 hover:text-white'
+                  }`}
+                >
+                  <Icon className="w-3 h-3 shrink-0" strokeWidth={2} />
+                  <span>{mode.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 1. Swipeable Showcase Stage (Geser Kiri/Kanan) */}
+          <div
+            data-focus-showcase="true"
+            onTouchStart={handleShowcaseTouchStart}
+            onTouchMove={handleShowcaseTouchMove}
+            onTouchEnd={handleShowcaseTouchEnd}
+            onTouchCancel={handleShowcaseTouchEnd}
+            style={{
+              transform: showcaseDragX !== 0 ? `translateX(${showcaseDragX}px)` : undefined,
+            }}
+            className={`relative shrink-0 touch-pan-y select-none ${
+              !isDraggingShowcase ? 'transition-transform duration-300 ease-out' : ''
+            }`}
+          >
+            {focusViewMode === 'cover' && (
+              <div className="relative pt-1">
+                <div
+                  aria-hidden="true"
+                  className="ambient-aura-layer absolute -inset-6 top-5 rounded-3xl blur-3xl transition-all duration-1000"
+                  style={{
+                    opacity: Math.min(0.65, gradientIntensity * 1.1),
+                    background: `radial-gradient(circle, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.85), rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.6), transparent 72%)`,
+                  }}
+                />
+                <CoverArt
+                  src={currentTrack?.coverUrl}
+                  alt={currentTrack?.title || 'Nocty'}
+                  sizeHint={networkMode === 'lite' ? 'sm' : 'lg'}
+                  className="relative w-56 h-56 sm:w-64 sm:h-64 lg:w-72 lg:h-72 shadow-[0_24px_60px_rgba(0,0,0,0.7)] ring-1 ring-white/12"
+                  roundedClass="rounded-2xl"
+                />
+              </div>
+            )}
+
+            {focusViewMode === 'vinyl' && (
+              <div className="on-artwork relative w-60 h-60 sm:w-72 sm:h-72 lg:w-80 lg:h-80 rounded-3xl bg-gradient-to-br from-[#1C1D24] via-[#121318] to-[#0B0B0E] border border-white/15 shadow-[0_26px_65px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.18)] p-4 flex items-center justify-center overflow-hidden">
+                {/* Ambient Turntable Subtle Glow */}
+                <div
+                  aria-hidden="true"
+                  className="ambient-aura-layer pointer-events-none absolute -inset-4 blur-2xl opacity-35"
+                  style={{
+                    background: `radial-gradient(circle at 35% 35%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.75), transparent 65%)`,
+                  }}
+                />
+
+                {/* Metallic Platter Base */}
+                <div className="relative w-[86%] h-[86%] rounded-full bg-gradient-to-br from-white/10 to-black/70 p-1.5 shadow-[0_14px_34px_rgba(0,0,0,0.85)] ring-1 ring-white/10 flex items-center justify-center">
+                  {/* Rotating Vinyl Disc + Center Album Art Label */}
+                  <div
+                    className={`relative w-full h-full rounded-full flex items-center justify-center shadow-inner animate-disc-spin ${
+                      isPlaying ? 'disc-running' : 'disc-paused'
+                    }`}
+                    style={{
+                      background: `
+                        radial-gradient(circle, rgba(20,20,24,0) 27%, rgba(255,255,255,0.06) 27.5%, rgba(15,15,18,0.96) 28.5%, rgba(12,12,15,0.98) 42%, rgba(255,255,255,0.05) 42.5%, rgba(14,14,17,0.98) 43.5%, rgba(10,10,13,0.98) 60%, rgba(255,255,255,0.045) 60.5%, rgba(12,12,15,0.98) 61.5%, rgba(10,10,13,0.99) 78%, rgba(255,255,255,0.04) 78.5%, rgba(12,12,14,1) 80%, #09090B 100%),
+                        conic-gradient(from 40deg, rgba(255,255,255,0.14) 0deg, transparent 50deg, rgba(255,255,255,0.04) 140deg, transparent 210deg, rgba(255,255,255,0.12) 290deg, transparent 360deg)
+                      `,
+                    }}
+                  >
+                    {/* Center Label Ring + Album Cover */}
+                    <div className="relative w-[42%] h-[42%] rounded-full p-1 bg-white/15 ring-1 ring-white/25 shadow-lg overflow-hidden">
+                      <CoverArt
+                        src={currentTrack?.coverUrl}
+                        alt={currentTrack?.title || 'Vinyl Nocty'}
+                        sizeHint={networkMode === 'lite' ? 'sm' : 'md'}
+                        className="w-full h-full rounded-full"
+                        roundedClass="rounded-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Center Spindle Pin (stationary) */}
+                  <div className="pointer-events-none absolute w-3.5 h-3.5 rounded-full bg-gradient-to-b from-zinc-200 to-zinc-500 border border-black/60 shadow-md z-10" />
+                </div>
+
+                {/* Articulated Turntable Tonearm (Needle pivots onto vinyl when playing) */}
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-3.5 right-3.5 z-20 w-9 h-9 flex items-center justify-center"
+                >
+                  {/* Gimbal Base */}
+                  <div className="relative w-8 h-8 rounded-full bg-gradient-to-b from-zinc-600 to-zinc-900 border border-white/20 shadow-lg flex items-center justify-center">
+                    <div className="w-4 h-4 rounded-full bg-gradient-to-b from-zinc-300 to-zinc-500 shadow-inner" />
+
+                    {/* Pivoting Arm Assembly */}
+                    <div
+                      className={`absolute top-1/2 left-1/2 -translate-x-1/2 origin-[50%_0%] transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                        isPlaying ? 'rotate-[25deg]' : 'rotate-[-6deg]'
+                      }`}
+                    >
+                      {/* Counterweight */}
+                      <div className="w-3.5 h-4 -mt-5 mx-auto rounded-sm bg-gradient-to-r from-zinc-400 via-zinc-200 to-zinc-500 border border-black/40 shadow" />
+                      {/* Tonearm Tube */}
+                      <div className="w-1.5 h-28 sm:h-36 lg:h-40 mx-auto rounded-full bg-gradient-to-r from-zinc-400 via-zinc-100 to-zinc-500 shadow-[2px_4px_10px_rgba(0,0,0,0.65)]" />
+                      {/* Angled Headshell & Stylus Cartridge */}
+                      <div className="w-3 h-6 -mt-1 mx-auto rotate-[16deg] rounded-sm bg-gradient-to-b from-zinc-800 to-black border border-white/20 shadow-md flex flex-col items-center justify-end pb-0.5">
+                        <span
+                          className={`w-1 h-1 rounded-full ${
+                            isPlaying ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]' : 'bg-white/30'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {focusViewMode === 'mv' && (
+              <div className="on-artwork relative w-60 h-60 sm:w-72 sm:h-72 lg:w-80 lg:h-80 rounded-3xl bg-black/30 backdrop-blur-md border border-white/[0.16] shadow-[0_24px_60px_rgba(0,0,0,0.55)] overflow-hidden flex flex-col items-center justify-center p-5 text-center">
+                {isAmbientVideoShowing ? (
+                  <>
+                    <div className="w-12 h-12 rounded-full bg-white/12 border border-white/20 flex items-center justify-center mb-3 backdrop-blur-xl">
+                      <Film className="w-5 h-5 text-white" strokeWidth={1.9} />
+                    </div>
+                    <p className="text-sm font-semibold text-white">
+                      Official Music Video Aktif
+                    </p>
+                    <p className="text-xs text-white/65 mt-1 leading-relaxed max-w-[210px]">
+                      Video resmi diputar di latar belakang tanpa suara untuk menjaga kualitas audio utama.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <CoverArt
+                      src={currentTrack?.coverUrl}
+                      alt={currentTrack?.title || 'Official MV'}
+                      sizeHint="md"
+                      className="w-24 h-24 opacity-75 mb-3 shadow-lg ring-1 ring-white/15"
+                      roundedClass="rounded-xl"
+                    />
+                    {isResolvingAmbientVideo ? (
+                      <div className="flex items-center gap-2 text-xs font-medium text-white/85">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2.1} />
+                        <span>Mencari Official Music Video...</span>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-white/70 leading-relaxed max-w-[220px]">
+                        {currentTrack?.sourceType === 'local'
+                          ? 'File MP3 lokal tidak memiliki video klip YouTube.'
+                          : networkMode === 'lite'
+                            ? 'Video nonaktif saat Mode Ringan hemat kuota aktif.'
+                            : 'Official Music Video resmi belum ditemukan untuk lagu ini.'}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Subtle Swipe Hint */}
+          <div className="flex items-center gap-1.5 -mt-2" aria-hidden="true">
+            {FOCUS_VIEW_MODES.map((m) => (
+              <span
+                key={m.id}
+                className={`h-1.5 rounded-full transition-all duration-300 ${
+                  focusViewMode === m.id ? 'w-5 bg-white/90' : 'w-1.5 bg-white/30'
+                }`}
+              />
+            ))}
           </div>
 
           {/* 2. Track Title, Artist & Like */}
@@ -404,6 +592,15 @@ export const ZenFocusMode: React.FC = () => {
               <p className="mt-1 text-sm text-white/65 truncate">
                 {currentTrack ? currentTrack.artist : 'Pilih lagu untuk mulai'}
               </p>
+              {isMoodShuffle && moodSessionProfile && (
+                <p className="mt-1 text-xs text-white/75 flex items-center gap-1.5 truncate">
+                  <Sparkles className="w-3 h-3 shrink-0" strokeWidth={2} />
+                  <span>
+                    Mood Shuffle: {moodSessionProfile.moodProfile} ·{' '}
+                    <span className="font-mono-tabular">{moodSessionProfile.tempoBpm} BPM</span>
+                  </span>
+                </p>
+              )}
             </div>
 
             {currentTrack && (
@@ -449,7 +646,26 @@ export const ZenFocusMode: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center justify-between gap-2 sm:gap-4">
+              <button
+                type="button"
+                onClick={toggleMoodShuffle}
+                aria-label="Mood Shuffle (Gemini AI)"
+                aria-pressed={isMoodShuffle}
+                title="Mood Shuffle — analisis energi & tempo via Gemini"
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
+                  isMoodShuffle
+                    ? 'bg-white text-[#0B0B0D]'
+                    : 'text-white/60 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                {isMoodShuffleLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" strokeWidth={2} />
+                ) : (
+                  <Sparkles className="w-4 h-4" strokeWidth={1.85} />
+                )}
+              </button>
+
               <button
                 type="button"
                 onClick={toggleShuffle}
@@ -512,38 +728,22 @@ export const ZenFocusMode: React.FC = () => {
             </div>
           </div>
 
-          {/* 4. Aligned Social Action Row (Nocty Twin, Kirim Whisper, Kartu Lirik) */}
-          {currentTrack && (
-            <div className="w-full max-w-md flex flex-wrap items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIsTwinModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-xs font-medium text-white transition-colors whitespace-nowrap"
-              >
-                <AppleEmoji unified="1f3a7" size={14} />
-                <span>Nocty Twin</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsWhisperComposerOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-xs font-medium text-white transition-colors whitespace-nowrap"
-              >
-                <AppleEmoji unified="2728" size={14} />
-                <span>Kirim Whisper</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsLyricCardOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-xs font-medium text-white transition-colors whitespace-nowrap"
-              >
-                <Share2 className="w-3.5 h-3.5 text-white/80" strokeWidth={1.9} />
-                <span>Kartu Lirik</span>
-              </button>
-            </div>
-          )}
+          {/* 4. Satu Pintu Akses Apple Liquid Glass: ✦ Nocty Studio */}
+          <div className="w-full max-w-md flex justify-center pt-1">
+            <button
+              type="button"
+              onClick={() => setIsStudioSheetOpen(true)}
+              className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-white/[0.10] hover:bg-white/[0.17] backdrop-blur-xl border border-white/[0.22] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.32),0_10px_28px_rgba(0,0,0,0.35)] text-xs sm:text-sm font-semibold text-white tracking-tight transition-all active:scale-95 whitespace-nowrap"
+            >
+              <span aria-hidden="true" className="text-white/90">
+                ✦
+              </span>
+              <span>Nocty Studio</span>
+            </button>
+          </div>
 
           {/* 5. Open Synced Lyrics Box Directly Below (with -0.5s / +0.5s offset controls) */}
-          <div className="w-full h-[360px] sm:h-[400px] rounded-2xl bg-white/[0.06] backdrop-blur-2xl border border-white/[0.10] overflow-hidden flex flex-col">
+          <div className="w-full h-[360px] sm:h-[400px] rounded-2xl bg-white/[0.06] backdrop-blur-md border border-white/[0.10] overflow-hidden flex flex-col">
             <SyncedLyricsList variant="zen" hideActionButtons={true} />
           </div>
         </div>
@@ -560,7 +760,7 @@ export const ZenFocusMode: React.FC = () => {
             aria-modal="true"
             aria-label="Antrean Pemutaran"
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full sm:max-w-lg h-[78vh] sm:h-[74vh] rounded-t-3xl sm:rounded-3xl bg-[#121216]/95 backdrop-blur-2xl border border-white/[0.12] shadow-2xl overflow-hidden flex flex-col"
+            className="relative w-full sm:max-w-lg h-[78vh] sm:h-[74vh] rounded-t-3xl sm:rounded-3xl bg-[#121216]/95 backdrop-blur-md border border-white/[0.12] shadow-2xl overflow-hidden flex flex-col"
           >
             <div className="flex flex-col gap-2 px-5 py-3.5 border-b border-white/[0.08] shrink-0">
               <div className="flex items-center justify-between gap-3">
@@ -681,95 +881,6 @@ export const ZenFocusMode: React.FC = () => {
         </div>
       )}
 
-      {/* Sleep Timer Modal / Popover inside Now Playing */}
-      {isSleepMenuOpen && (
-        <div
-          className="fixed inset-0 z-30 flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm"
-          onClick={() => setIsSleepMenuOpen(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Pengaturan Sleep Timer"
-            onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-xs rounded-2xl bg-[#121216]/92 backdrop-blur-2xl border border-white/[0.12] shadow-2xl p-4 space-y-3.5"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="font-display text-sm font-semibold text-white">Sleep Timer</h3>
-                <p className="text-xs text-white/55 mt-0.5">
-                  Hentikan pemutar musik otomatis saat durasi berakhir
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsSleepMenuOpen(false)}
-                aria-label="Tutup sleep timer"
-                className="w-7 h-7 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors shrink-0"
-              >
-                <X className="w-4 h-4" strokeWidth={1.9} />
-              </button>
-            </div>
-
-            {isSleepActive && (
-              <div className="rounded-xl bg-white/[0.07] border border-white/[0.09] px-3.5 py-2.5 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[11px] text-white/55">Timer aktif</p>
-                  <p className="font-mono-tabular text-base font-semibold text-white leading-tight mt-0.5">
-                    {sleepTimerMode === 'countdown' && sleepTimerRemaining !== null
-                      ? formatSleepCountdown(sleepTimerRemaining)
-                      : 'Akhir lagu ini'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    cancelSleepTimer();
-                    setIsSleepMenuOpen(false);
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-white/12 hover:bg-white/20 text-xs font-medium text-white transition-colors whitespace-nowrap shrink-0"
-                >
-                  Matikan
-                </button>
-              </div>
-            )}
-
-            <div className="grid grid-cols-3 gap-2">
-              {SLEEP_PRESET_MINUTES.map((mins) => (
-                <button
-                  key={mins}
-                  type="button"
-                  onClick={() => {
-                    setSleepTimerMinutes(mins);
-                    setIsSleepMenuOpen(false);
-                  }}
-                  className="py-2.5 px-2 rounded-xl bg-white/[0.07] hover:bg-white/[0.15] border border-white/[0.09] text-xs font-medium text-white/90 hover:text-white transition-colors active:scale-[0.98] whitespace-nowrap"
-                >
-                  <span className="font-mono-tabular">{mins}</span> menit
-                </button>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setSleepTimerEndOfTrack();
-                setIsSleepMenuOpen(false);
-              }}
-              className={`w-full py-2.5 px-3 rounded-xl flex items-center justify-between text-xs font-medium transition-colors whitespace-nowrap ${
-                sleepTimerMode === 'end_of_track'
-                  ? 'bg-white text-[#0B0B0D]'
-                  : 'bg-white/[0.07] hover:bg-white/[0.14] border border-white/[0.09] text-white/85 hover:text-white'
-              }`}
-            >
-              <span>Akhir lagu ini</span>
-              {sleepTimerMode === 'end_of_track' && (
-                <Check className="w-3.5 h-3.5 shrink-0" strokeWidth={2.3} />
-              )}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

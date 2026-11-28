@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
+import { useSettings } from '../context/SettingsContext';
 import {
   TWIN_BADGE_META,
   TwinBadge,
@@ -43,6 +44,7 @@ export const NoctyTwinModal: React.FC = () => {
     ambientPalette,
     pushToast,
   } = usePlayer();
+  const { settings } = useSettings();
 
   const [partnerName, setPartnerName] = useState('Pasanganmu');
   const [badge, setBadge] = useState<TwinBadge>('Couple / LDR');
@@ -61,6 +63,9 @@ export const NoctyTwinModal: React.FC = () => {
   const [receiptBlob, setReceiptBlob] = useState<Blob | null>(null);
 
   const channelRef = useRef<BroadcastChannel | null>(null);
+  const twinNotificationsRef = useRef(settings.twinNotificationsEnabled);
+  twinNotificationsRef.current = settings.twinNotificationsEnabled;
+  const lastPulseToastAtRef = useRef(0);
 
   const displayTrack = useMemo(
     () => currentTrack || indonesiaTrending[0] || null,
@@ -76,6 +81,18 @@ export const NoctyTwinModal: React.FC = () => {
     ch.onmessage = (event) => {
       if (event.data?.type === 'pulse' && typeof event.data.unified === 'string') {
         spawnFloatingPulse(event.data.unified);
+        if (twinNotificationsRef.current) {
+          try {
+            navigator.vibrate?.(35);
+          } catch {
+            // Ignore vibration restriction
+          }
+          const now = Date.now();
+          if (now - lastPulseToastAtRef.current > 4000) {
+            lastPulseToastAtRef.current = now;
+            pushToast('Twin mengirim Tap Heart!', 'info');
+          }
+        }
       }
     };
 
@@ -83,7 +100,7 @@ export const NoctyTwinModal: React.FC = () => {
       ch.close();
       channelRef.current = null;
     };
-  }, [roomCode]);
+  }, [roomCode, pushToast]);
 
   // Auto-open if user lands on ?twin=ROOM
   useEffect(() => {
@@ -213,7 +230,7 @@ export const NoctyTwinModal: React.FC = () => {
       className="fixed inset-0 z-[72] flex items-center justify-center p-4"
     >
       <div
-        className="fixed inset-0 bg-black/78 backdrop-blur-xl"
+        className="fixed inset-0 bg-black/78 backdrop-blur-md"
         onClick={() => setIsTwinModalOpen(false)}
         aria-hidden="true"
       />
@@ -234,11 +251,11 @@ export const NoctyTwinModal: React.FC = () => {
         ))}
       </div>
 
-      <div className="relative z-10 w-full max-w-lg max-h-[92vh] flex flex-col rounded-3xl bg-[#121216]/92 backdrop-blur-2xl border border-white/[0.13] shadow-[0_32px_90px_rgba(0,0,0,0.8)] overflow-hidden">
+      <div className="relative z-10 w-full max-w-lg max-h-[92vh] flex flex-col rounded-3xl bg-[#121216]/92 backdrop-blur-md border border-white/[0.13] shadow-[0_32px_90px_rgba(0,0,0,0.8)] overflow-hidden">
         {/* Ambient Dual Glow */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -top-24 inset-x-0 h-56 blur-3xl opacity-30"
+          className="ambient-aura-layer pointer-events-none absolute -top-24 inset-x-0 h-56 blur-3xl opacity-30"
           style={{
             background: `
               radial-gradient(circle at 25% 30%, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.95) 0%, transparent 65%),

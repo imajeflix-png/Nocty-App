@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Compass, Disc3, Heart, Home, ListMusic, Plus, Upload } from 'lucide-react';
+import { Compass, Disc3, Heart, Home, ListMusic, Plus, Sparkles, Upload } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 import { AppleEmoji } from './AppleEmoji';
 import { CoverArt } from './CoverArt';
@@ -35,7 +35,7 @@ export const Sidebar: React.FC = () => {
   return (
     <aside
       aria-label="Navigasi Utama"
-      className="hidden lg:flex w-[248px] shrink-0 rounded-2xl bg-white/[0.05] backdrop-blur-2xl border border-white/[0.08] flex-col overflow-hidden select-none"
+      className="hidden lg:flex w-[248px] shrink-0 rounded-[28px] bg-white/[0.06] backdrop-blur-3xl backdrop-saturate-150 border border-white/[0.18] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] flex-col overflow-hidden select-none"
     >
       {/* Primary Navigation */}
       <nav className="p-3 space-y-1">
@@ -63,6 +63,19 @@ export const Sidebar: React.FC = () => {
         >
           <Compass className="w-4 h-4 shrink-0" strokeWidth={activeView === 'explore' ? 2.1 : 1.75} />
           <span>Explore</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveView('studio')}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
+            activeView === 'studio'
+              ? 'bg-white/12 text-white'
+              : 'text-white/65 hover:text-white hover:bg-white/[0.06]'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 shrink-0" strokeWidth={activeView === 'studio' ? 2.1 : 1.75} />
+          <span>Studio</span>
         </button>
 
         <button

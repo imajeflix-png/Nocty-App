@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Heart, Loader2, Pause, Play, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Heart, Loader2, Pause, Play, Search, X } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 import { MOOD_CATEGORIES } from '../data/moods';
 import { searchOnlineTracks } from '../services/musicApi';
@@ -137,14 +137,14 @@ const HorizontalTrackShelf: React.FC<HorizontalShelfProps> = ({ title, tracks, i
                     playTrack(track, tracks);
                   }
                 }}
-                className="group w-[148px] sm:w-[176px] lg:w-[184px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-xl"
+                className="group relative overflow-hidden w-[156px] sm:w-[184px] lg:w-[192px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-[24px] p-2.5 bg-gradient-to-br from-white/[0.10] to-white/[0.03] hover:from-white/[0.14] hover:to-white/[0.05] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.26),0_12px_28px_rgba(0,0,0,0.38)] transition-all duration-200"
               >
-                <div className="relative aspect-square w-full rounded-xl overflow-hidden shadow-lg shadow-black/50">
+                <div className="relative aspect-square w-full rounded-2xl overflow-hidden shadow-lg shadow-black/45">
                   <CoverArt
                     src={track.coverUrl}
                     alt={track.title}
                     className="w-full h-full transition-transform duration-300 group-hover:scale-[1.03]"
-                    roundedClass="rounded-xl"
+                    roundedClass="rounded-2xl"
                   />
 
                   <span
@@ -164,8 +164,8 @@ const HorizontalTrackShelf: React.FC<HorizontalShelfProps> = ({ title, tracks, i
                   </span>
                 </div>
 
-                <p className="mt-2.5 text-sm font-medium text-white truncate">{track.title}</p>
-                <p className="text-xs text-white/55 truncate mt-0.5">{track.artist}</p>
+                <p className="mt-2.5 px-0.5 text-sm font-medium text-white truncate">{track.title}</p>
+                <p className="px-0.5 pb-0.5 text-xs text-white/60 truncate mt-0.5">{track.artist}</p>
               </div>
             );
           })}
@@ -181,6 +181,10 @@ export const HomeView: React.FC = () => {
     indonesiaTrending,
     viralTracks,
     indieRnbTracks,
+    likedTracks,
+    localTracks,
+    queueTracks,
+    trackRegistry,
     isTrendingLoading,
     currentTrack,
     isPlaying,
@@ -191,20 +195,62 @@ export const HomeView: React.FC = () => {
     isLiked,
     pushToast,
     registerTracks,
-    setIsTwinModalOpen,
-    setIsWeeklyAuraOpen,
     isDynamicThemeSync,
+    setSearchQuery,
+    setActiveView,
   } = usePlayer();
 
   const [loadingMoodId, setLoadingMoodId] = useState<string | null>(null);
   const [activeMoodTitle, setActiveMoodTitle] = useState<string | null>(null);
   const [moodTracks, setMoodTracks] = useState<Track[]>([]);
   const [vibeFilter, setVibeFilter] = useState<VibePreset | null>(null);
+  const [homeSearchQuery, setHomeSearchQuery] = useState<string>('');
 
   const heroPool = indonesiaTrending.length > 0 ? indonesiaTrending : featuredTracks;
   const heroTrack = heroPool[0] || null;
   const quickPicks = heroPool.slice(0, 6);
   const { primary, secondary, gradientIntensity } = ambientPalette;
+
+  const allHomeSearchPool = useMemo<Track[]>(() => {
+    const map = new Map<string, Track>();
+    const append = (list: Track[]) => {
+      for (const t of list) {
+        if (t && !map.has(t.id)) {
+          map.set(t.id, t);
+        }
+      }
+    };
+    append(indonesiaTrending);
+    append(featuredTracks);
+    append(viralTracks);
+    append(indieRnbTracks);
+    append(likedTracks);
+    append(localTracks);
+    append(queueTracks);
+    append(Object.values(trackRegistry));
+    return Array.from(map.values());
+  }, [
+    featuredTracks,
+    indieRnbTracks,
+    indonesiaTrending,
+    likedTracks,
+    localTracks,
+    queueTracks,
+    trackRegistry,
+    viralTracks,
+  ]);
+
+  const trimmedHomeQuery = homeSearchQuery.trim();
+  const liveFilteredTracks = useMemo<Track[]>(() => {
+    if (!trimmedHomeQuery) return [];
+    const tokens = trimmedHomeQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    return allHomeSearchPool
+      .filter((t) => {
+        const hay = `${t.title} ${t.artist} ${t.album || ''}`.toLowerCase();
+        return tokens.every((tok) => hay.includes(tok));
+      })
+      .slice(0, 24);
+  }, [allHomeSearchPool, trimmedHomeQuery]);
 
   const sortedIndonesiaCharts = useMemo(
     () => sortTracksByVibe(indonesiaTrending, vibeFilter),
@@ -246,7 +292,81 @@ export const HomeView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-9 sm:space-y-11 pb-8">
+    <div className="space-y-8 sm:space-y-10 pb-44 lg:pb-12">
+      {/* Spotify-Style Concave Liquid Glass Capsule Search Bar directly below Header */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 rounded-full bg-white/[0.07] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.18] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_8px_24px_rgba(0,0,0,0.28)] focus-within:bg-white/[0.11] focus-within:border-white/30 transition-all">
+          <Search className="w-4 h-4 text-white/65 shrink-0" strokeWidth={2} />
+          <input
+            type="text"
+            value={homeSearchQuery}
+            onChange={(e) => setHomeSearchQuery(e.target.value)}
+            placeholder="Cari lagu, artis, atau MV..."
+            aria-label="Cari lagu, artis, atau MV"
+            className="flex-1 min-w-0 bg-transparent text-sm text-white placeholder-white/50 focus:outline-none"
+          />
+          {homeSearchQuery && (
+            <button
+              type="button"
+              onClick={() => setHomeSearchQuery('')}
+              aria-label="Bersihkan pencarian"
+              className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/75 hover:text-white transition-colors shrink-0"
+            >
+              <X className="w-3.5 h-3.5" strokeWidth={2} />
+            </button>
+          )}
+        </div>
+
+        {/* Live Filtered Matches while typing */}
+        {trimmedHomeQuery && (
+          <section className="rounded-[28px] bg-gradient-to-br from-white/[0.10] to-white/[0.03] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_12px_32px_rgba(0,0,0,0.45)] p-4 sm:p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="font-display text-base sm:text-lg font-bold text-white">
+                  Hasil Pencarian
+                </h2>
+                <p className="text-xs text-white/60">
+                  <span className="font-mono-tabular">{liveFilteredTracks.length}</span> lagu cocok untuk &ldquo;{trimmedHomeQuery}&rdquo;
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery(trimmedHomeQuery);
+                  setActiveView('explore');
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/[0.10] hover:bg-white/[0.18] backdrop-blur-xl border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] text-xs font-medium text-white transition-colors whitespace-nowrap"
+              >
+                <Search className="w-3.5 h-3.5" strokeWidth={2} />
+                <span>Cari online di Explore</span>
+              </button>
+            </div>
+
+            {liveFilteredTracks.length === 0 ? (
+              <div className="py-6 text-center space-y-2">
+                <p className="text-sm text-white/70">
+                  Belum ada lagu lokal/tangga lagu yang cocok di Beranda.
+                </p>
+                <p className="text-xs text-white/50">
+                  Ketuk &ldquo;Cari online di Explore&rdquo; untuk mencari katalog global &amp; Official MV.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-white/[0.06]">
+                {liveFilteredTracks.map((track, idx) => (
+                  <TrackRow
+                    key={track.id}
+                    track={track}
+                    index={idx}
+                    contextTracks={liveFilteredTracks}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+      </div>
+
       {/* Row 0: Sorotan Utama / Pilihan Editor Hero Spotlight */}
       <section className="space-y-4">
         <h1 className="font-display text-2xl sm:text-[1.75rem] font-bold tracking-tight text-white text-balance">
@@ -254,8 +374,8 @@ export const HomeView: React.FC = () => {
         </h1>
 
         {isTrendingLoading || !heroTrack ? (
-          <div className="rounded-2xl bg-white/[0.04] border border-white/[0.07] p-5 sm:p-7 flex flex-col sm:flex-row sm:items-center gap-6">
-            <div className="w-44 h-44 sm:w-48 sm:h-48 aspect-square rounded-xl bg-white/[0.06] animate-pulse shrink-0 mx-auto sm:mx-0" />
+          <div className="rounded-[32px] bg-gradient-to-br from-white/[0.10] to-white/[0.03] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_16px_40px_rgba(0,0,0,0.45)] p-5 sm:p-7 flex flex-col sm:flex-row sm:items-center gap-6">
+            <div className="w-44 h-44 sm:w-48 sm:h-48 aspect-square rounded-2xl bg-white/[0.06] animate-pulse shrink-0 mx-auto sm:mx-0" />
             <div className="flex-1 space-y-3">
               <div className="h-3.5 w-36 rounded bg-white/[0.06] animate-pulse" />
               <div className="h-8 w-3/4 rounded bg-white/[0.06] animate-pulse" />
@@ -264,11 +384,16 @@ export const HomeView: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="relative overflow-hidden rounded-2xl bg-white/[0.05] border border-white/[0.08] p-5 sm:p-7">
+          <div className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-white/[0.10] to-white/[0.03] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_16px_40px_rgba(0,0,0,0.45)] p-5 sm:p-7">
+            {/* Specular curved top highlight */}
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent z-20"
+            />
             {/* Soft Ambient Cover Glow */}
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute -top-16 -left-10 w-80 h-80 rounded-full blur-3xl transition-all duration-1000"
+              className="ambient-aura-layer pointer-events-none absolute -top-16 -left-10 w-80 h-80 rounded-full blur-3xl transition-all duration-1000"
               style={{
                 opacity: Math.min(0.62, gradientIntensity * 1.05),
                 background: `radial-gradient(circle, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.95) 0%, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.55) 45%, transparent 72%)`,
@@ -276,7 +401,7 @@ export const HomeView: React.FC = () => {
             />
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute -bottom-20 right-0 w-72 h-72 rounded-full blur-3xl transition-all duration-1000"
+              className="ambient-aura-layer pointer-events-none absolute -bottom-20 right-0 w-72 h-72 rounded-full blur-3xl transition-all duration-1000"
               style={{
                 opacity: Math.min(0.45, gradientIntensity * 0.78),
                 background: `radial-gradient(circle, rgba(${secondary.r}, ${secondary.g}, ${secondary.b}, 0.9) 0%, transparent 70%)`,
@@ -287,7 +412,7 @@ export const HomeView: React.FC = () => {
               <div className="relative shrink-0 mx-auto sm:mx-0">
                 <div
                   aria-hidden="true"
-                  className="pointer-events-none absolute -inset-3 rounded-2xl blur-2xl opacity-35"
+                  className="ambient-aura-layer pointer-events-none absolute -inset-3 rounded-2xl blur-2xl opacity-35"
                   style={{
                     background: `radial-gradient(circle, rgba(${primary.r}, ${primary.g}, ${primary.b}, 0.85), transparent 72%)`,
                   }}
@@ -377,10 +502,10 @@ export const HomeView: React.FC = () => {
                   key={track.id}
                   type="button"
                   onClick={() => playTrack(track, quickPicks)}
-                  className={`group flex items-center gap-3 pr-3 rounded-xl overflow-hidden text-left border transition-all duration-150 ${
+                  className={`group flex items-center gap-3 pr-3 rounded-2xl overflow-hidden text-left border backdrop-blur-2xl backdrop-saturate-150 transition-all duration-150 ${
                     active
-                      ? 'bg-white/14 border-white/20'
-                      : 'bg-white/[0.05] hover:bg-white/[0.09] border-white/[0.08]'
+                      ? 'bg-gradient-to-br from-white/[0.16] to-white/[0.06] border-white/[0.24] shadow-[inset_0_1px_1px_rgba(255,255,255,0.32),0_10px_28px_rgba(0,0,0,0.38)]'
+                      : 'bg-gradient-to-br from-white/[0.10] to-white/[0.03] hover:from-white/[0.14] hover:to-white/[0.05] border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.24),0_8px_24px_rgba(0,0,0,0.32)]'
                   }`}
                 >
                   <CoverArt
@@ -413,49 +538,6 @@ export const HomeView: React.FC = () => {
             })}
           </div>
         )}
-      </section>
-
-      {/* Row 1.5: 2-Column Apple Glass Social Feature Cards (Nocty Twin & Weekly Aura) */}
-      <section aria-label="Fitur Sosial Nocty" className="grid grid-cols-2 gap-3">
-        <button
-          type="button"
-          onClick={() => setIsTwinModalOpen(true)}
-          className="group relative overflow-hidden rounded-2xl bg-white/[0.06] hover:bg-white/[0.10] backdrop-blur-xl border border-white/[0.10] p-3.5 sm:p-4 text-left transition-all duration-150 active:scale-[0.98]"
-        >
-          <div className="flex items-start gap-2.5 sm:gap-3">
-            <span className="w-10 h-10 rounded-xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center shrink-0">
-              <AppleEmoji unified="1f3a7" size={20} alt="Nocty Twin" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="font-display text-sm sm:text-[15px] font-bold text-white truncate">
-                Nocty Twin
-              </p>
-              <p className="mt-0.5 text-xs text-white/60 leading-snug line-clamp-2">
-                Dengar bareng &amp; cetak momen
-              </p>
-            </div>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setIsWeeklyAuraOpen(true)}
-          className="group relative overflow-hidden rounded-2xl bg-white/[0.06] hover:bg-white/[0.10] backdrop-blur-xl border border-white/[0.10] p-3.5 sm:p-4 text-left transition-all duration-150 active:scale-[0.98]"
-        >
-          <div className="flex items-start gap-2.5 sm:gap-3">
-            <span className="w-10 h-10 rounded-xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center shrink-0">
-              <AppleEmoji unified="2728" size={20} alt="Weekly Aura" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="font-display text-sm sm:text-[15px] font-bold text-white truncate">
-                Weekly Aura
-              </p>
-              <p className="mt-0.5 text-xs text-white/60 leading-snug line-clamp-2">
-                Raport musik minggumu
-              </p>
-            </div>
-          </div>
-        </button>
       </section>
 
       {/* Vibe Filter Bar for iTunes Charts */}
@@ -495,8 +577,8 @@ export const HomeView: React.FC = () => {
                   }
                   className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold transition-all active:scale-[0.97] whitespace-nowrap ${
                     selected
-                      ? 'bg-white text-[#0B0B0D] shadow-md'
-                      : 'bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.09] text-white/85 hover:text-white'
+                      ? 'bg-white text-[#0B0B0D] shadow-[0_6px_20px_rgba(255,255,255,0.25)]'
+                      : 'bg-white/[0.07] hover:bg-white/[0.13] backdrop-blur-2xl border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.24)] text-white/90 hover:text-white'
                   }`}
                 >
                   <AppleEmoji unified={preset.emojiUnified} size={14} />
@@ -569,9 +651,9 @@ export const HomeView: React.FC = () => {
                     handleMoodClick(mood);
                   }
                 }}
-                className="group w-[148px] sm:w-[176px] lg:w-[184px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-xl"
+                className="group relative overflow-hidden w-[156px] sm:w-[184px] lg:w-[192px] shrink-0 snap-start cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-[24px] p-2.5 bg-gradient-to-br from-white/[0.10] to-white/[0.03] hover:from-white/[0.14] hover:to-white/[0.05] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.16] shadow-[inset_0_1px_1px_rgba(255,255,255,0.26),0_12px_28px_rgba(0,0,0,0.38)] transition-all duration-200"
               >
-                <div className="relative aspect-square w-full rounded-xl overflow-hidden shadow-lg shadow-black/50">
+                <div className="relative aspect-square w-full rounded-2xl overflow-hidden shadow-lg shadow-black/45">
                   <img
                     src={mood.coverUrl}
                     alt={mood.label}
