@@ -277,25 +277,46 @@ function extractVideoRenderers(payload: unknown): InnerTubeVideoRenderer[] {
   return results;
 }
 
-const DISALLOWED_MV_REGEX =
-  /\b(lyrics?|lirik|audio\s*only|official\s*audio|static|cover|karaoke|instrumental|slowed|reverb|nightcore|lyric\s*video|8d\s*audio|sped\s*up)\b/i;
+const OFFICIAL_CHANNEL_REGEX =
+  /(vevo|official|records|music|entertainment|musica|aquarius|nagaswara|trinity|sony|warner|universal|88rising|label|studio|proaktif|blackboard|ascada|pelangi|falcon|\s-\s*topic$)/i;
+
+const AMATEUR_VIDEO_REGEX =
+  /\b(karaoke|smule|starmaker|guitar\s*cover|piano\s*cover|drum\s*cover|bass\s*cover|violin\s*cover|vocal\s*cover|acoustic\s*cover|slowed|reverb|nightcore|8d\s*audio|sped\s*up|fan\s*made|fanmade|parody|reaction|tutorial|chord|ringtone)\b/i;
+
+function isOfficialChannelOrLabel(channelOwner: string): boolean {
+  return Boolean(channelOwner && OFFICIAL_CHANNEL_REGEX.test(channelOwner));
+}
+
+function isAmateurOrUnofficialCover(rawTitle: string, channelOwner: string): boolean {
+  if (AMATEUR_VIDEO_REGEX.test(rawTitle)) return true;
+  if (/\bcover\b/i.test(rawTitle)) {
+    const hasOfficialTag = /\bofficial\b/i.test(rawTitle) || isOfficialChannelOrLabel(channelOwner);
+    return !hasOfficialTag;
+  }
+  return false;
+}
 
 function scoreOfficialMusicVideo(rawTitle: string, channelOwner: string): number {
   const t = rawTitle.toLowerCase();
   const c = channelOwner.toLowerCase();
-  if (DISALLOWED_MV_REGEX.test(rawTitle)) return -100;
+  if (isAmateurOrUnofficialCover(rawTitle, channelOwner)) return -100;
 
   let score = 0;
-  if (t.includes('official music video')) score += 16;
-  if (t.includes('official mv')) score += 15;
-  if (t.includes('official video')) score += 12;
-  if (t.includes('music video') || /\bmv\b/.test(t)) score += 9;
-  if (t.includes('visualizer')) score -= 2;
-  if (t.includes('live') || t.includes('acoustic')) score -= 6;
-  if (c.includes('vevo') || c.includes('official') || c.includes('records') || c.includes('music')) {
-    score += 5;
+  if (t.includes('official music video')) score += 20;
+  if (t.includes('official mv')) score += 18;
+  if (t.includes('official video')) score += 16;
+  if (t.includes('music video') || /\bmv\b/.test(t)) score += 12;
+  if (t.includes('official audio')) score += 7;
+  if (t.includes('visualizer')) score += 3;
+  if (t.includes('lyric video') || /\b(lyrics?|lirik)\b/.test(t)) {
+    score += isOfficialChannelOrLabel(channelOwner) ? 1 : -6;
   }
-  if (c.includes(' - topic')) score -= 12;
+  if (t.includes('audio only') || t.includes('static')) score -= 6;
+  if (t.includes('live') || t.includes('acoustic')) score -= 3;
+  if (isOfficialChannelOrLabel(channelOwner)) {
+    score += 8;
+  }
+  if (c.endsWith('- topic')) score -= 5;
   return score;
 }
 
@@ -329,6 +350,7 @@ async function queryYouTubeInnerTube(
   const data: unknown = await response.json();
   const renderers = extractVideoRenderers(data);
   const wantsLong = /mix|album|mashup|medley|playlist|live\s+concert/i.test(query);
+  const wantsAmateur = /\b(karaoke|cover|reaction|tutorial|slowed|reverb|nightcore|sped\s*up)\b/i.test(query);
 
   const candidates: Array<{ track: CatalogTrack; score: number }> = [];
   const seenKeys = new Set<string>();
@@ -346,20 +368,17 @@ async function queryYouTubeInnerTube(
       continue;
     }
 
-    if (mode === 'mv' && DISALLOWED_MV_REGEX.test(rawTitle)) {
+    const rawOwner =
+      vr.ownerText?.runs?.[0]?.text || vr.longBylineText?.runs?.[0]?.text || '';
+
+    if (mode === 'mv') {
+      if (isAmateurOrUnofficialCover(rawTitle, rawOwner)) continue;
+    } else if (!wantsAmateur && isAmateurOrUnofficialCover(rawTitle, rawOwner)) {
       continue;
     }
 
     const duration = parseLengthSeconds(vr.lengthText?.simpleText);
     if (duration < 45 || (!wantsLong && duration > 720)) continue;
-
-    const rawOwner =
-      vr.ownerText?.runs?.[0]?.text || vr.longBylineText?.runs?.[0]?.text || '';
-
-    if (mode === 'mv' && /\s-\s*Topic$/i.test(rawOwner)) {
-      // YouTube Topic channels are static album-art audio tracks, not moving Music Videos
-      continue;
-    }
 
     const { title, artist } = cleanMusicTitleAndArtist(rawTitle, rawOwner);
     const dedupKey = mode === 'mv' ? videoId : normalizeDedupKey(title, artist);
@@ -714,6 +733,8 @@ function mergeAndDeduplicate(lists: CatalogTrack[][], limit: number, query = '')
         const existing = merged[existingIdx];
         if (!existing.coverUrl && track.coverUrl) existing.coverUrl = track.coverUrl;
         if (!existing.videoId && track.videoId) existing.videoId = track.videoId;
+        if (!existing.rawTitle && track.rawTitle) existing.rawTitle = track.rawTitle;
+        if (!existing.channelName && track.channelName) existing.channelName = track.channelName;
         if (!existing.audioUrl && track.audioUrl) existing.audioUrl = track.audioUrl;
         continue;
       }
@@ -748,16 +769,16 @@ async function startServer() {
 
     const rawLimit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 40;
     const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(50, rawLimit)) : 40;
-    const ytSongQuery = /\b(audio|lyrics?|lirik|song|lagu|remix|cover|live|acoustic)\b/i.test(rawQ)
-      ? rawQ
-      : `${rawQ} song audio`;
+    const tokenCount = rawQ.split(/\s+/).filter(Boolean).length;
+    const hasHint = /\b(audio|lyrics?|lirik|song|lagu|remix|cover|live|acoustic|official|mv|video)\b/i.test(rawQ);
+    const ytSongQuery = hasHint || tokenCount >= 2 ? rawQ : `${rawQ} lagu official`;
 
     try {
       const [itunesRes, deezerRes, saavnRes, ytRes] = await Promise.allSettled([
         queryItunes(rawQ, 25),
         queryDeezer(rawQ, 25),
         queryJioSaavn(rawQ, 20),
-        queryYouTubeInnerTube(ytSongQuery, 20).then(async (tracks) =>
+        queryYouTubeInnerTube(ytSongQuery, 24).then(async (tracks) =>
           tracks.length > 0 ? tracks : queryPipedMusicFallback(rawQ, 15)
         ),
       ]);
@@ -768,7 +789,7 @@ async function startServer() {
       const ytTracks = ytRes.status === 'fulfilled' ? ytRes.value : [];
 
       const merged = mergeAndDeduplicate(
-        [itunesTracks, deezerTracks, ytTracks, saavnTracks],
+        [itunesTracks, ytTracks, deezerTracks, saavnTracks],
         limit,
         rawQ
       );
@@ -953,12 +974,14 @@ ${JSON.stringify(candidatesSlice)}`;
     const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(40, rawLimit)) : 16;
     const mode = req.query.mode === 'mv' ? 'mv' : 'audio';
 
+    const tokenCount = rawQ.split(/\s+/).filter(Boolean).length;
     const hasMediaHint =
       mode === 'mv' ||
-      /\b(audio|lyrics?|lirik|song|lagu|remix|cover|live|acoustic|akustik|lofi|beats|music\s*video|official\s*video|official\s*mv|\bmv\b)\b/i.test(
+      tokenCount >= 2 ||
+      /\b(audio|lyrics?|lirik|song|lagu|remix|cover|live|acoustic|akustik|lofi|beats|music\s*video|official\s*video|official\s*mv|official\s*audio|\bmv\b)\b/i.test(
         rawQ
       );
-    const effectiveQuery = hasMediaHint ? rawQ : `${rawQ} official audio`;
+    const effectiveQuery = hasMediaHint ? rawQ : `${rawQ} official`;
 
     try {
       let tracks = await queryYouTubeInnerTube(effectiveQuery, limit, mode);

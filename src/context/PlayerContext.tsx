@@ -20,6 +20,8 @@ import { DEFAULT_COVER_URL, EMERGENCY_FALLBACK_TRACKS } from '../data/moods';
 import { triggerHaptic } from '../utils/haptics';
 import {
   ListeningHistoryEntry,
+  addRecentSearch,
+  clearRecentSearches as clearRecentSearchesStorage,
   deleteLocalTrackFromDb,
   extractLocalFileDuration,
   getAllLocalTracksFromDb,
@@ -29,8 +31,10 @@ import {
   loadListeningHistory,
   loadPlayerPrefs,
   loadPlaylistsFromStorage,
+  loadRecentSearches,
   loadSavedTracksFromStorage,
   parseFileNameMeta,
+  removeRecentSearch as removeRecentSearchStorage,
   saveAmbientVideoPref,
   saveAutoplayPref,
   saveLikedIdsToStorage,
@@ -160,11 +164,20 @@ export interface MoodSessionProfile {
 }
 
 interface PlayerContextValue {
-  // Navigation & Global Search
+  // Navigation & Unified Global Search
   activeView: NavView;
   setActiveView: (view: NavView) => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
+  searchResults: Track[];
+  onlineSearchResults: Track[];
+  localSearchMatches: Array<{ track: Track; snippet?: string }>;
+  lyricLibraryMatches: Array<{ track: Track; snippet: string }>;
+  isSearching: boolean;
+  recentSearches: string[];
+  recordRecentSearch: (query: string) => void;
+  removeRecentSearch: (term: string) => void;
+  clearRecentSearches: () => void;
   selectedPlaylistId: string | null;
   openPlaylist: (playlistId: string) => void;
   rightPanelTab: RightPanelTab;
@@ -361,6 +374,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Views & UI Panels — always launch on Home with Right Panel CLOSED
   const [activeView, setActiveView] = useState<NavView>('home');
   const [searchQuery, setSearchQuery] = useState('');
+  const [onlineSearchResults, setOnlineSearchResults] = useState<Track[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => loadRecentSearches());
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>(null);
   const [isZenMode, setIsZenMode] = useState(false);
@@ -1237,7 +1253,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       (raw.includes('official music video') ||
         raw.includes('official mv') ||
         raw.includes('official video')) &&
-      !/\b(lyrics?|lirik|audio\s*only|official\s*audio|static|cover|karaoke|instrumental|slowed|reverb|lyric\s*video)\b/i.test(
+      !/\b(karaoke|smule|starmaker|slowed|reverb|nightcore|8d\s*audio|sped\s*up|reaction|tutorial)\b/i.test(
         raw
       );
 
@@ -3383,6 +3399,62 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [pushToast, trackRegistry]
   );
 
+  const recordRecentSearch = useCallback((query: string) => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return;
+    setRecentSearches((prev) => addRecentSearch(trimmed, prev));
+  }, []);
+
+  const removeRecentSearch = useCallback((term: string) => {
+    setRecentSearches((prev) => removeRecentSearchStorage(term, prev));
+  }, []);
+
+  const clearRecentSearches = useCallback(() => {
+    setRecentSearches(clearRecentSearchesStorage());
+  }, []);
+
+  // Unified Real-Time Global Search (400ms debounced iTunes + YouTube + Deezer + JioSaavn)
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      setOnlineSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsSearching(true);
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const { tracks } = await searchOnlineTracks(trimmed, controller.signal, 40);
+        if (controller.signal.aborted) return;
+        registerTracks(tracks);
+        setOnlineSearchResults(tracks);
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError') return;
+        setOnlineSearchResults([]);
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearching(false);
+        }
+      }
+    }, 400);
+
+    const settleTimer =
+      trimmed.length >= 2
+        ? window.setTimeout(() => {
+            recordRecentSearch(trimmed);
+          }, 900)
+        : null;
+
+    return () => {
+      window.clearTimeout(timer);
+      if (settleTimer !== null) window.clearTimeout(settleTimer);
+      controller.abort();
+    };
+  }, [searchQuery, registerTracks, recordRecentSearch]);
+
   const likedTracks = useMemo(
     () => likedIds.map((id) => trackRegistry[id]).filter((t): t is Track => Boolean(t)),
     [likedIds, trackRegistry]
@@ -3393,11 +3465,110 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [queueIds, trackRegistry]
   );
 
+  const localSearchMatches = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const pool = localTracks.map((t) => trackRegistry[t.id] || t);
+    if (!q) return pool.map((track) => ({ track, snippet: undefined as string | undefined }));
+
+    const matched: Array<{ track: Track; snippet?: string }> = [];
+    for (const track of pool) {
+      const titleHit = track.title.toLowerCase().includes(q);
+      const artistHit = track.artist.toLowerCase().includes(q);
+      const albumHit = (track.album || '').toLowerCase().includes(q);
+      const lyricHit = track.lyrics.find((l) => l.text.toLowerCase().includes(q));
+      const plainHit =
+        !lyricHit && track.plainLyrics
+          ? track.plainLyrics.split('\n').find((line) => line.toLowerCase().includes(q))
+          : undefined;
+
+      if (titleHit || artistHit || albumHit || lyricHit || plainHit) {
+        matched.push({
+          track,
+          snippet: lyricHit?.text || plainHit,
+        });
+      }
+    }
+    return matched;
+  }, [localTracks, searchQuery, trackRegistry]);
+
+  const lyricLibraryMatches = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q.length < 3) return [];
+    const results: Array<{ track: Track; snippet: string }> = [];
+    for (const track of Object.values(trackRegistry)) {
+      if (track.sourceType === 'local') continue;
+      const line = track.lyrics.find((l) => l.text.toLowerCase().includes(q));
+      if (line) {
+        results.push({ track, snippet: line.text });
+      }
+    }
+    return results;
+  }, [searchQuery, trackRegistry]);
+
+  const searchResults = useMemo<Track[]>(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return [];
+
+    const map = new Map<string, Track>();
+    const append = (list: Track[]) => {
+      for (const t of list) {
+        if (t && !map.has(t.id)) {
+          map.set(t.id, t);
+        }
+      }
+    };
+
+    append(localSearchMatches.map((m) => m.track));
+    append(onlineSearchResults);
+    append(lyricLibraryMatches.map((m) => m.track));
+
+    // Provide instant local/chart feedback while debounced global search is still fetching
+    if (onlineSearchResults.length === 0) {
+      const tokens = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
+      const instantPool = [
+        ...likedTracks,
+        ...indonesiaTrending,
+        ...featuredTracks,
+        ...viralTracks,
+        ...indieRnbTracks,
+        ...queueTracks,
+      ];
+      for (const t of instantPool) {
+        const hay = `${t.title} ${t.artist} ${t.album || ''}`.toLowerCase();
+        if (tokens.every((tok) => hay.includes(tok)) && !map.has(t.id)) {
+          map.set(t.id, t);
+        }
+      }
+    }
+
+    return Array.from(map.values());
+  }, [
+    featuredTracks,
+    indieRnbTracks,
+    indonesiaTrending,
+    likedTracks,
+    localSearchMatches,
+    lyricLibraryMatches,
+    onlineSearchResults,
+    queueTracks,
+    searchQuery,
+    viralTracks,
+  ]);
+
   const value: PlayerContextValue = {
     activeView,
     setActiveView,
     searchQuery,
     setSearchQuery,
+    searchResults,
+    onlineSearchResults,
+    localSearchMatches,
+    lyricLibraryMatches,
+    isSearching,
+    recentSearches,
+    recordRecentSearch,
+    removeRecentSearch,
+    clearRecentSearches,
     selectedPlaylistId,
     openPlaylist,
     rightPanelTab,

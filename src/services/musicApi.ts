@@ -7,7 +7,7 @@ import {
 } from '../utils/networkTelemetry';
 
 const CACHE_TTL_24H_MS = 24 * 60 * 60 * 1000;
-const SEARCH_CACHE_KEY = 'nocty_search_cache_v1';
+const SEARCH_CACHE_KEY = 'nocty_search_cache_v2';
 const CURATED_CACHE_KEY = 'nocty_curated_cache_v1';
 const STREAM_CACHE_KEY = 'nocty_stream_cache_v1';
 const MAX_API_TIMEOUT_MS = 5000;
@@ -639,10 +639,12 @@ async function clientDirectParallelSearch(
     return [] as Track[];
   })();
 
-  const ytSongQuery = /\b(audio|lyrics?|lirik|song|lagu)\b/i.test(query)
-    ? query
-    : `${query} song audio`;
-  const pipedPromise = searchPipedClient(ytSongQuery, externalSignal, 16).catch(() => [] as Track[]);
+  const tokenCount = query.trim().split(/\s+/).filter(Boolean).length;
+  const ytSongQuery =
+    /\b(audio|lyrics?|lirik|song|lagu|official|mv|video)\b/i.test(query) || tokenCount >= 2
+      ? query
+      : `${query} lagu official`;
+  const pipedPromise = searchPipedClient(ytSongQuery, externalSignal, 18).catch(() => [] as Track[]);
 
   const [itunesTracks, pipedTracks, saavnTracks] = await Promise.all([
     itunesPromise,
@@ -663,6 +665,8 @@ async function clientDirectParallelSearch(
       if (existingIdx !== undefined) {
         const existing = merged[existingIdx];
         if (!existing.videoId && t.videoId) existing.videoId = t.videoId;
+        if (!existing.rawTitle && t.rawTitle) existing.rawTitle = t.rawTitle;
+        if (!existing.channelName && t.channelName) existing.channelName = t.channelName;
         if (!existing.audioUrl && t.audioUrl) existing.audioUrl = t.audioUrl;
         if (existing.coverUrl === DEFAULT_COVER_URL && t.coverUrl !== DEFAULT_COVER_URL) {
           existing.coverUrl = t.coverUrl;
@@ -839,37 +843,72 @@ export async function resolveYouTubeVideoId(
   }
 }
 
-const DISALLOWED_MV_KEYWORDS_REGEX =
-  /\b(lyrics?|lirik|audio\s*only|official\s*audio|static|cover|karaoke|instrumental|slowed|reverb|nightcore|lyric\s*video|8d\s*audio|sped\s*up)\b/i;
+const OFFICIAL_CHANNEL_REGEX =
+  /(vevo|official|records|music|entertainment|musica|aquarius|nagaswara|trinity|sony|warner|universal|88rising|label|studio|proaktif|blackboard|ascada|pelangi|falcon|\s-\s*topic$)/i;
 
-function isValidOfficialMusicVideoCandidate(candidate: Track): boolean {
-  const label = `${candidate.rawTitle || candidate.title} ${candidate.channelName || ''}`.trim();
-  if (DISALLOWED_MV_KEYWORDS_REGEX.test(label)) return false;
-  if (candidate.channelName && /\s-\s*Topic$/i.test(candidate.channelName)) return false;
-  return Boolean(candidate.videoId);
+const AMATEUR_MV_KEYWORDS_REGEX =
+  /\b(karaoke|smule|starmaker|guitar\s*cover|piano\s*cover|drum\s*cover|bass\s*cover|violin\s*cover|vocal\s*cover|acoustic\s*cover|slowed|reverb|nightcore|8d\s*audio|sped\s*up|fan\s*made|fanmade|parody|reaction|tutorial|chord|ringtone)\b/i;
+
+function isOfficialChannelUpload(channelName?: string, artistHint?: string): boolean {
+  if (!channelName) return false;
+  if (OFFICIAL_CHANNEL_REGEX.test(channelName)) return true;
+  if (artistHint) {
+    const normChannel = normalizeSearchText(channelName);
+    const normArtist = normalizeSearchText(artistHint);
+    if (normArtist.length >= 3 && normChannel.includes(normArtist)) return true;
+  }
+  return false;
 }
 
-function pickBestOfficialMusicVideo(candidates: Track[]): Track | null {
-  const filtered = candidates.filter(isValidOfficialMusicVideoCandidate);
+function isValidOfficialMusicVideoCandidate(candidate: Track, artistHint?: string): boolean {
+  if (!candidate.videoId) return false;
+  const rawTitle = candidate.rawTitle || candidate.title || '';
+  const channel = candidate.channelName || '';
+  if (AMATEUR_MV_KEYWORDS_REGEX.test(rawTitle)) return false;
+
+  const isOfficialChannel = isOfficialChannelUpload(channel, artistHint);
+  if (/\bcover\b/i.test(rawTitle) && !/\bofficial\b/i.test(rawTitle) && !isOfficialChannel) {
+    return false;
+  }
+
+  return true;
+}
+
+function scoreMusicVideoCandidate(candidate: Track, artistHint?: string): number {
+  const t = (candidate.rawTitle || candidate.title || '').toLowerCase();
+  const c = (candidate.channelName || '').toLowerCase();
+  const isOfficialChannel = isOfficialChannelUpload(candidate.channelName, artistHint);
+
+  let score = 0;
+  if (t.includes('official music video')) score += 20;
+  if (t.includes('official mv')) score += 18;
+  if (t.includes('official video')) score += 16;
+  if (t.includes('music video') || /\bmv\b/.test(t)) score += 12;
+  if (t.includes('official audio')) score += 7;
+  if (t.includes('visualizer')) score += 3;
+  if (t.includes('lyric video') || /\b(lyrics?|lirik)\b/.test(t)) {
+    score += isOfficialChannel ? 1 : -6;
+  }
+  if (t.includes('audio only') || t.includes('static')) score -= 6;
+  if (isOfficialChannel) score += 8;
+  if (c.endsWith('- topic')) score -= 5;
+  return score;
+}
+
+function pickBestOfficialMusicVideo(candidates: Track[], artistHint?: string): Track | null {
+  const filtered = candidates.filter((c) => isValidOfficialMusicVideoCandidate(c, artistHint));
   if (filtered.length === 0) return null;
 
-  const explicitMv = filtered.find((c) => {
-    const t = `${c.rawTitle || c.title}`.toLowerCase();
-    return (
-      t.includes('official music video') ||
-      t.includes('official mv') ||
-      t.includes('official video') ||
-      t.includes('music video') ||
-      /\bmv\b/.test(t)
-    );
-  });
-
-  return explicitMv || filtered[0] || null;
+  return (
+    [...filtered].sort(
+      (a, b) => scoreMusicVideoCandidate(b, artistHint) - scoreMusicVideoCandidate(a, artistHint)
+    )[0] || null
+  );
 }
 
 /**
- * Resolves a real moving Official Music Video videoId for Focus Zone & Ambient Video Backdrop.
- * Strictly rejects Lyrics, Audio Only, Static, and Cover videos.
+ * Resolves a real Official Music Video / Official Video / Official Audio or official artist/label upload videoId
+ * for Focus Zone & Ambient Video Backdrop, filtering out amateur karaoke and unofficial covers.
  */
 export async function resolveYouTubeMusicVideoId(
   artist: string,
@@ -886,12 +925,18 @@ export async function resolveYouTubeMusicVideoId(
   try {
     const primaryQuery = `${cleanTitle} ${cleanArtist} Official Music Video`;
     const primaryCandidates = await searchYouTubeTracks(primaryQuery, externalSignal, 10, 'mv');
-    let best = pickBestOfficialMusicVideo(primaryCandidates);
+    let best = pickBestOfficialMusicVideo(primaryCandidates, cleanArtist);
 
     if (!best) {
-      const secondaryQuery = `${cleanTitle} ${cleanArtist} Official MV`;
+      const secondaryQuery = `${cleanTitle} ${cleanArtist} Official Video`;
       const secondaryCandidates = await searchYouTubeTracks(secondaryQuery, externalSignal, 10, 'mv');
-      best = pickBestOfficialMusicVideo(secondaryCandidates);
+      best = pickBestOfficialMusicVideo(secondaryCandidates, cleanArtist);
+    }
+
+    if (!best) {
+      const tertiaryQuery = `${cleanTitle} ${cleanArtist} Official Audio`;
+      const tertiaryCandidates = await searchYouTubeTracks(tertiaryQuery, externalSignal, 8, 'mv');
+      best = pickBestOfficialMusicVideo(tertiaryCandidates, cleanArtist);
     }
 
     const mvId = best?.videoId || null;

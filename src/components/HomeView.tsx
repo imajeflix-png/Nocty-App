@@ -196,61 +196,24 @@ export const HomeView: React.FC = () => {
     pushToast,
     registerTracks,
     isDynamicThemeSync,
+    searchQuery,
     setSearchQuery,
-    setActiveView,
+    searchResults,
+    isSearching,
+    recordRecentSearch,
   } = usePlayer();
 
   const [loadingMoodId, setLoadingMoodId] = useState<string | null>(null);
   const [activeMoodTitle, setActiveMoodTitle] = useState<string | null>(null);
   const [moodTracks, setMoodTracks] = useState<Track[]>([]);
   const [vibeFilter, setVibeFilter] = useState<VibePreset | null>(null);
-  const [homeSearchQuery, setHomeSearchQuery] = useState<string>('');
 
   const heroPool = indonesiaTrending.length > 0 ? indonesiaTrending : featuredTracks;
   const heroTrack = heroPool[0] || null;
   const quickPicks = heroPool.slice(0, 6);
-  const { primary, secondary, gradientIntensity } = ambientPalette;
+  const { primary, gradientIntensity } = ambientPalette;
 
-  const allHomeSearchPool = useMemo<Track[]>(() => {
-    const map = new Map<string, Track>();
-    const append = (list: Track[]) => {
-      for (const t of list) {
-        if (t && !map.has(t.id)) {
-          map.set(t.id, t);
-        }
-      }
-    };
-    append(indonesiaTrending);
-    append(featuredTracks);
-    append(viralTracks);
-    append(indieRnbTracks);
-    append(likedTracks);
-    append(localTracks);
-    append(queueTracks);
-    append(Object.values(trackRegistry));
-    return Array.from(map.values());
-  }, [
-    featuredTracks,
-    indieRnbTracks,
-    indonesiaTrending,
-    likedTracks,
-    localTracks,
-    queueTracks,
-    trackRegistry,
-    viralTracks,
-  ]);
-
-  const trimmedHomeQuery = homeSearchQuery.trim();
-  const liveFilteredTracks = useMemo<Track[]>(() => {
-    if (!trimmedHomeQuery) return [];
-    const tokens = trimmedHomeQuery.toLowerCase().split(/\s+/).filter(Boolean);
-    return allHomeSearchPool
-      .filter((t) => {
-        const hay = `${t.title} ${t.artist} ${t.album || ''}`.toLowerCase();
-        return tokens.every((tok) => hay.includes(tok));
-      })
-      .slice(0, 24);
-  }, [allHomeSearchPool, trimmedHomeQuery]);
+  const trimmedQuery = searchQuery.trim();
 
   const sortedIndonesiaCharts = useMemo(
     () => sortTracksByVibe(indonesiaTrending, vibeFilter),
@@ -293,22 +256,30 @@ export const HomeView: React.FC = () => {
 
   return (
     <div className="space-y-8 sm:space-y-10 pb-44 lg:pb-12">
-      {/* Monochromatic Smoke Glass Capsule Search Bar */}
+      {/* Monochromatic Smoke Glass Capsule Search Bar (Unified with Explore) */}
       <div className="space-y-4">
         <div className="flex items-center gap-3 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] px-4 py-3 focus-within:bg-white/[0.07] focus-within:border-white/20 transition-all">
           <Search className="w-4 h-4 text-zinc-400 shrink-0" strokeWidth={2} />
           <input
             type="text"
-            value={homeSearchQuery}
-            onChange={(e) => setHomeSearchQuery(e.target.value)}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && searchQuery.trim()) {
+                recordRecentSearch(searchQuery);
+              }
+            }}
             placeholder="Cari lagu, artis, atau MV..."
             aria-label="Cari lagu, artis, atau MV"
             className="flex-1 min-w-0 bg-transparent text-sm text-white placeholder-zinc-500 focus:outline-none"
           />
-          {homeSearchQuery && (
+          {isSearching && trimmedQuery && (
+            <Loader2 className="w-4 h-4 text-zinc-400 animate-spin shrink-0" strokeWidth={2} />
+          )}
+          {searchQuery && (
             <button
               type="button"
-              onClick={() => setHomeSearchQuery('')}
+              onClick={() => setSearchQuery('')}
               aria-label="Bersihkan pencarian"
               className="w-7 h-7 rounded-full bg-white/[0.08] hover:bg-white/[0.15] flex items-center justify-center text-zinc-300 hover:text-white transition-colors shrink-0"
             >
@@ -317,8 +288,8 @@ export const HomeView: React.FC = () => {
           )}
         </div>
 
-        {/* Live Filtered Matches while typing */}
-        {trimmedHomeQuery && (
+        {/* Unified Search Results (Local MP3 + Global iTunes/YouTube) */}
+        {trimmedQuery && (
           <section className="rounded-2xl bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] p-4 sm:p-5 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -326,39 +297,46 @@ export const HomeView: React.FC = () => {
                   Hasil Pencarian
                 </h2>
                 <p className="text-xs text-zinc-400">
-                  <span className="font-mono-tabular">{liveFilteredTracks.length}</span> lagu cocok untuk &ldquo;{trimmedHomeQuery}&rdquo;
+                  {isSearching ? (
+                    <span>Mencari &ldquo;{trimmedQuery}&rdquo; di katalog global &amp; lokal...</span>
+                  ) : (
+                    <>
+                      <span className="font-mono-tabular">{searchResults.length}</span> lagu ditemukan untuk &ldquo;{trimmedQuery}&rdquo;
+                    </>
+                  )}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery(trimmedHomeQuery);
-                  setActiveView('explore');
-                }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/[0.07] hover:bg-white/[0.12] border border-white/[0.10] text-xs font-medium text-white transition-colors whitespace-nowrap"
-              >
-                <Search className="w-3.5 h-3.5" strokeWidth={2} />
-                <span>Cari online di Explore</span>
-              </button>
+              {isSearching && (
+                <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} />
+                  <span>Memuat...</span>
+                </span>
+              )}
             </div>
 
-            {liveFilteredTracks.length === 0 ? (
-              <div className="py-6 text-center space-y-2">
+            {isSearching && searchResults.length === 0 ? (
+              <div className="space-y-2 py-1">
+                {Array.from({ length: 5 }).map((_, idx) => (
+                  <div key={idx} className="h-14 rounded-xl bg-white/[0.04] animate-pulse" />
+                ))}
+              </div>
+            ) : searchResults.length === 0 ? (
+              <div className="py-6 text-center space-y-1.5">
                 <p className="text-sm text-zinc-300">
-                  Belum ada lagu lokal/tangga lagu yang cocok di Beranda.
+                  Tidak ada lagu atau artis ditemukan untuk &ldquo;{trimmedQuery}&rdquo;.
                 </p>
                 <p className="text-xs text-zinc-500">
-                  Ketuk &ldquo;Cari online di Explore&rdquo; untuk mencari katalog global &amp; Official MV.
+                  Coba periksa ejaan judul lagu atau nama artis lainnya.
                 </p>
               </div>
             ) : (
               <div className="divide-y divide-white/[0.06]">
-                {liveFilteredTracks.map((track, idx) => (
+                {searchResults.map((track, idx) => (
                   <TrackRow
                     key={track.id}
                     track={track}
                     index={idx}
-                    contextTracks={liveFilteredTracks}
+                    contextTracks={searchResults}
                   />
                 ))}
               </div>

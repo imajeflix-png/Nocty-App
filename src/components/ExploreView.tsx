@@ -1,13 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Clock, History, Loader2, Search, Upload, X } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 import { searchOnlineTracks } from '../services/musicApi';
-import {
-  addRecentSearch,
-  clearRecentSearches,
-  loadRecentSearches,
-  removeRecentSearch,
-} from '../services/storageDb';
 import { Track } from '../types/music';
 import { TrackRow } from './TrackRow';
 
@@ -32,30 +26,27 @@ export const ExploreView: React.FC = () => {
   const {
     searchQuery,
     setSearchQuery,
-    localTracks,
+    onlineSearchResults,
+    localSearchMatches,
+    lyricLibraryMatches,
+    isSearching,
+    recentSearches,
+    recordRecentSearch,
+    removeRecentSearch,
+    clearRecentSearches,
     indonesiaTrending,
     featuredTracks,
     viralTracks,
     indieRnbTracks,
     isTrendingLoading,
-    trackRegistry,
     registerTracks,
     uploadLocalFiles,
   } = usePlayer();
 
-  const [onlineResults, setOnlineResults] = useState<Track[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [activeChannel, setActiveChannel] = useState<CuratedChannelId>('indonesia');
   const [channelTracks, setChannelTracks] = useState<Track[]>([]);
   const [isChannelLoading, setIsChannelLoading] = useState(false);
-  const [recentSearches, setRecentSearches] = useState<string[]>(() => loadRecentSearches());
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const recordRecentSearch = useCallback((query: string) => {
-    const trimmed = query.trim();
-    if (trimmed.length < 2) return;
-    setRecentSearches((prev) => addRecentSearch(trimmed, prev));
-  }, []);
 
   const handleSelectRecentSearch = useCallback(
     (term: string) => {
@@ -65,98 +56,16 @@ export const ExploreView: React.FC = () => {
     [recordRecentSearch, setSearchQuery]
   );
 
-  const handleRemoveRecentSearch = useCallback((term: string) => {
-    setRecentSearches((prev) => removeRecentSearch(term, prev));
-  }, []);
+  const handleRemoveRecentSearch = useCallback(
+    (term: string) => {
+      removeRecentSearch(term);
+    },
+    [removeRecentSearch]
+  );
 
   const handleClearRecentSearches = useCallback(() => {
-    setRecentSearches(clearRecentSearches());
-  }, []);
-
-  const localMatches = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    const pool = localTracks.map((t) => trackRegistry[t.id] || t);
-    if (!q) return pool.map((track) => ({ track, snippet: undefined as string | undefined }));
-
-    const matched: { track: Track; snippet?: string }[] = [];
-    for (const track of pool) {
-      const titleHit = track.title.toLowerCase().includes(q);
-      const artistHit = track.artist.toLowerCase().includes(q);
-      const lyricHit = track.lyrics.find((l) => l.text.toLowerCase().includes(q));
-      const plainHit =
-        !lyricHit && track.plainLyrics
-          ? track.plainLyrics.split('\n').find((line) => line.toLowerCase().includes(q))
-          : undefined;
-
-      if (titleHit || artistHit || lyricHit || plainHit) {
-        matched.push({
-          track,
-          snippet: lyricHit?.text || plainHit,
-        });
-      }
-    }
-    return matched;
-  }, [localTracks, searchQuery, trackRegistry]);
-
-  const lyricLibraryMatches = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (q.length < 3) return [];
-    const results: { track: Track; snippet: string }[] = [];
-    for (const track of Object.values(trackRegistry)) {
-      if (track.sourceType === 'local') continue;
-      const line = track.lyrics.find((l) => l.text.toLowerCase().includes(q));
-      if (line) {
-        results.push({ track, snippet: line.text });
-      }
-    }
-    return results;
-  }, [searchQuery, trackRegistry]);
-
-  // Global + Indonesian Search (up to 40 deduplicated tracks from JioSaavn + iTunes)
-  useEffect(() => {
-    const trimmed = searchQuery.trim();
-    if (!trimmed) {
-      setOnlineResults([]);
-      setIsSearching(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    setIsSearching(true);
-
-    const timer = window.setTimeout(async () => {
-      try {
-        const { tracks } = await searchOnlineTracks(trimmed, controller.signal, 40);
-        if (controller.signal.aborted) return;
-        registerTracks(tracks);
-        setOnlineResults(tracks);
-      } catch (err) {
-        if ((err as Error)?.name === 'AbortError') return;
-        setOnlineResults([]);
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsSearching(false);
-        }
-      }
-    }, 300);
-
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [searchQuery, registerTracks]);
-
-  // Persist settled search queries (>= 2 chars) to Recent Searches (max 10 in localStorage)
-  useEffect(() => {
-    const trimmed = searchQuery.trim();
-    if (trimmed.length < 2) return;
-
-    const settleTimer = window.setTimeout(() => {
-      recordRecentSearch(trimmed);
-    }, 850);
-
-    return () => window.clearTimeout(settleTimer);
-  }, [searchQuery, recordRecentSearch]);
+    clearRecentSearches();
+  }, [clearRecentSearches]);
 
   // Dynamic Curated Browse Feed when Search Input is empty
   useEffect(() => {
@@ -235,10 +144,10 @@ export const ExploreView: React.FC = () => {
           </p>
         </div>
 
-        {/* Mobile Concave Liquid Glass Search Pill */}
-        <div className="relative sm:hidden">
+        {/* Unified Monochromatic Smoke Glass Search Pill (synced with Home) */}
+        <div className="relative">
           <Search
-            className="w-4 h-4 text-white/55 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none z-10"
+            className="w-4 h-4 text-zinc-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none z-10"
             strokeWidth={1.9}
           />
           <input
@@ -250,9 +159,9 @@ export const ExploreView: React.FC = () => {
                 recordRecentSearch(searchQuery);
               }
             }}
-            placeholder="Ketik judul, artis, atau lirik..."
+            placeholder="Cari lagu, artis, atau MV..."
             aria-label="Cari lagu, artis, atau lirik"
-            className="w-full h-11 pl-11 pr-10 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] text-sm text-white placeholder-zinc-400 focus:outline-none focus:border-white/25"
+            className="w-full h-11 pl-11 pr-10 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] text-sm text-white placeholder-zinc-400 focus:outline-none focus:bg-white/[0.07] focus:border-white/25 transition-all"
           />
           {searchQuery && (
             <button
@@ -361,7 +270,7 @@ export const ExploreView: React.FC = () => {
         <div className="flex items-center justify-between gap-4">
           <h2 className="font-display text-base font-bold text-white">Koleksi Lokal</h2>
           <div className="flex items-center gap-3">
-            <span className="font-mono-tabular text-xs text-white/45">{localMatches.length} lagu</span>
+            <span className="font-mono-tabular text-xs text-white/45">{localSearchMatches.length} lagu</span>
             <input
               ref={fileInputRef}
               type="file"
@@ -381,7 +290,7 @@ export const ExploreView: React.FC = () => {
           </div>
         </div>
 
-        {localMatches.length === 0 ? (
+        {localSearchMatches.length === 0 ? (
           <p className="py-3 text-sm text-white/45">
             {searchQuery.trim()
               ? 'Tidak ada lagu lokal yang cocok dengan kata kunci tersebut.'
@@ -389,12 +298,12 @@ export const ExploreView: React.FC = () => {
           </p>
         ) : (
           <div className="divide-y divide-white/[0.06]">
-            {localMatches.map(({ track, snippet }, idx) => (
+            {localSearchMatches.map(({ track, snippet }, idx) => (
               <TrackRow
                 key={track.id}
                 track={track}
                 index={idx}
-                contextTracks={localMatches.map((m) => m.track)}
+                contextTracks={localSearchMatches.map((m) => m.track)}
                 lyricSnippet={snippet}
               />
             ))}
@@ -438,9 +347,9 @@ export const ExploreView: React.FC = () => {
                 <span>Mencari...</span>
               </span>
             ) : (
-              onlineResults.length > 0 && (
+              onlineSearchResults.length > 0 && (
                 <span className="font-mono-tabular text-xs text-white/45">
-                  {onlineResults.length} hasil
+                  {onlineSearchResults.length} hasil
                 </span>
               )
             )
@@ -478,18 +387,18 @@ export const ExploreView: React.FC = () => {
               <div key={idx} className="h-14 rounded-xl bg-white/[0.04] animate-pulse" />
             ))}
           </div>
-        ) : onlineResults.length === 0 ? (
+        ) : onlineSearchResults.length === 0 ? (
           <p className="py-8 text-sm text-white/55">
             Tidak ada hasil ditemukan untuk &ldquo;{searchQuery}&rdquo;. Coba kata kunci artis atau judul lain.
           </p>
         ) : (
           <div className="divide-y divide-white/[0.06]">
-            {onlineResults.map((track, idx) => (
+            {onlineSearchResults.map((track, idx) => (
               <TrackRow
                 key={track.id}
                 track={track}
                 index={idx}
-                contextTracks={onlineResults}
+                contextTracks={onlineSearchResults}
               />
             ))}
           </div>
